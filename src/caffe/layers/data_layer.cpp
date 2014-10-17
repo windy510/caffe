@@ -15,6 +15,14 @@
 
 namespace caffe {
 
+struct MDB {
+  MDB(): mdb_env_(), count_() {};
+  MDB_env* mdb_env_;
+  int count_;
+};
+static map<string, MDB> mdbs_;
+static boost::mutex mdbs_mutex_;
+
 template <typename Dtype>
 DataLayer<Dtype>::~DataLayer<Dtype>() {
   this->JoinPrefetchThread();
@@ -23,10 +31,11 @@ DataLayer<Dtype>::~DataLayer<Dtype>() {
   case DataParameter_DB_LEVELDB:
     break;  // do nothing
   case DataParameter_DB_LMDB:
-    mdb_cursor_close(mdb_cursor_);
-    mdb_close(mdb_env_, mdb_dbi_);
-    mdb_txn_abort(mdb_txn_);
-    mdb_env_close(mdb_env_);
+// TODO dec and close
+//    mdb_cursor_close(mdb_cursor_);
+//    mdb_close(mdb_env_, mdb_dbi_);
+//    mdb_txn_abort(mdb_txn_);
+//    mdb_env_close(mdb_env_);
     break;
   default:
     LOG(FATAL) << "Unknown database backend";
@@ -55,19 +64,31 @@ void DataLayer<Dtype>::DataLayerSetUp(const vector<Blob<Dtype>*>& bottom,
     }
     break;
   case DataParameter_DB_LMDB: {
-    CHECK_EQ(mdb_env_create(&mdb_env_), MDB_SUCCESS) << "mdb_env_create failed";
-    CHECK_EQ(mdb_env_set_mapsize(mdb_env_, 1099511627776), MDB_SUCCESS);  // 1TB
-    // No locking, assume db is not written to at the same time, otherwise
-    // LMDB tries to lock the file, which fails if it's read-only
-    unsigned int flags = MDB_RDONLY|MDB_NOTLS|MDB_NOLOCK;
-    struct stat st_buf;
-    stat (this->layer_param_.data_param().source().c_str(), &st_buf);
-    if (S_ISREG (st_buf.st_mode)) // Allow DB to be stand-alone file
-      flags |= MDB_NOSUBDIR;
-    CHECK_EQ(mdb_env_open(mdb_env_,
-             this->layer_param_.data_param().source().c_str(),
-             flags, 0664), MDB_SUCCESS) << "mdb_env_open failed";
-    CHECK_EQ(mdb_txn_begin(mdb_env_, NULL, MDB_RDONLY, &mdb_txn_), MDB_SUCCESS)
+    // Create env if first
+    MDB_env* mdb_env;
+    {
+      boost::mutex::scoped_lock lock(mdbs_mutex_);
+      const string& file = this->layer_param_.data_param().source();
+      MDB mdb = mdbs_[file];
+      if(mdb.count_ == 0) {
+        CHECK_EQ(mdb_env_create(&mdb_env), MDB_SUCCESS) << "mdb_env_create failed";
+        CHECK_EQ(mdb_env_set_mapsize(mdb_env, 8796093022208), MDB_SUCCESS);  // 8TB
+        // No locking, assume db is not written to at the same time, otherwise
+        // LMDB tries to lock the file, which fails if it's read-only
+        unsigned int flags = MDB_RDONLY|MDB_NOTLS|MDB_NOLOCK;
+        struct stat st_buf;
+        stat (this->layer_param_.data_param().source().c_str(), &st_buf);
+        if (S_ISREG (st_buf.st_mode)) // Allow DB to be stand-alone file
+          flags |= MDB_NOSUBDIR;
+        CHECK_EQ(mdb_env_open(mdb_env, file.c_str(), flags, 0664),
+            MDB_SUCCESS) << "mdb_env_open failed";
+        mdb.mdb_env_ = mdb_env;
+      } else
+        mdb_env = mdb.mdb_env_;
+      mdb.count_++;
+      mdbs_[file] = mdb;
+    }
+    CHECK_EQ(mdb_txn_begin(mdb_env, NULL, MDB_RDONLY, &mdb_txn_), MDB_SUCCESS)
         << "mdb_txn_begin failed";
     CHECK_EQ(mdb_open(mdb_txn_, NULL, 0, &mdb_dbi_), MDB_SUCCESS)
         << "mdb_open failed";
@@ -125,14 +146,16 @@ void DataLayer<Dtype>::DataLayerSetUp(const vector<Blob<Dtype>*>& bottom,
   if (crop_size > 0) {
     top[0]->Reshape(this->layer_param_.data_param().batch_size(),
                        datum.channels(), crop_size, crop_size);
-    this->prefetch_data_.Reshape(this->layer_param_.data_param().batch_size(),
-        datum.channels(), crop_size, crop_size);
+    for(int i = 0; i < this->PREFETCH_COUNT; ++i)
+      this->prefetch_[i].data_.Reshape(this->layer_param_.data_param().batch_size(),
+          datum.channels(), crop_size, crop_size);
   } else {
     top[0]->Reshape(
         this->layer_param_.data_param().batch_size(), datum.channels(),
         datum.height(), datum.width());
-    this->prefetch_data_.Reshape(this->layer_param_.data_param().batch_size(),
-        datum.channels(), datum.height(), datum.width());
+    for(int i = 0; i < this->PREFETCH_COUNT; ++i)
+      this->prefetch_[i].data_.Reshape(this->layer_param_.data_param().batch_size(),
+          datum.channels(), datum.height(), datum.width());
   }
   LOG(INFO) << "output data size: " << top[0]->num() << ","
       << top[0]->channels() << "," << top[0]->height() << ","
@@ -140,8 +163,9 @@ void DataLayer<Dtype>::DataLayerSetUp(const vector<Blob<Dtype>*>& bottom,
   // label
   if (this->output_labels_) {
     top[1]->Reshape(this->layer_param_.data_param().batch_size(), 1, 1, 1);
-    this->prefetch_label_.Reshape(this->layer_param_.data_param().batch_size(),
-        1, 1, 1);
+    for(int i = 0; i < this->PREFETCH_COUNT; ++i)
+      this->prefetch_[i].label_.Reshape(this->layer_param_.data_param().batch_size(),
+          1, 1, 1);
   }
   // datum size
   this->datum_channels_ = datum.channels();
@@ -150,16 +174,16 @@ void DataLayer<Dtype>::DataLayerSetUp(const vector<Blob<Dtype>*>& bottom,
   this->datum_size_ = datum.channels() * datum.height() * datum.width();
 }
 
-// This function is used to create a thread that prefetches the data.
+// This function is called on prefetch thread
 template <typename Dtype>
-void DataLayer<Dtype>::InternalThreadEntry() {
+void DataLayer<Dtype>::load_batch(Batch<Dtype>* batch) {
   Datum datum;
-  CHECK(this->prefetch_data_.count());
-  Dtype* top_data = this->prefetch_data_.mutable_cpu_data();
+  CHECK(batch->data_.count());
+  Dtype* top_data = batch->data_.mutable_cpu_data();
   Dtype* top_label = NULL;  // suppress warnings about uninitialized variables
-  if (this->output_labels_) {
-    top_label = this->prefetch_label_.mutable_cpu_data();
-  }
+  if (this->output_labels_)
+    top_label = batch->label_.mutable_cpu_data();
+
   const int batch_size = this->layer_param_.data_param().batch_size();
 
   for (int item_id = 0; item_id < batch_size; ++item_id) {

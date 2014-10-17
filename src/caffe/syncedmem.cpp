@@ -124,6 +124,20 @@ void* SyncedMemory::mutable_gpu_data() {
 #endif
 }
 
+void SyncedMemory::async_gpu_push(const cudaStream_t& stream) {
+#ifndef CPU_ONLY
+  CHECK(head_ == HEAD_AT_CPU);
+  if (gpu_ptr_ == NULL) {
+    CUDA_CHECK(cudaMalloc(&gpu_ptr_, size_));
+    own_gpu_data_ = true;
+  }
+  CUDA_CHECK(cudaMemcpyAsync(gpu_ptr_, cpu_ptr_, size_, cudaMemcpyHostToDevice, stream));
+  // Assume caller will synchronize on the stream before use
+  head_ = SYNCED;
+#else
+  NO_GPU;
+#endif
+}
 
 }  // namespace caffe
 

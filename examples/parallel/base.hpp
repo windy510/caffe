@@ -16,20 +16,16 @@ using namespace caffe;
 // Context for a solver running in a thread. Both initialization and run
 // of the solver are done on the thread, to point to the same instance of the
 // thread-local Caffe singleton.
-class SolverContext: public PThread {
+class SolverContext: public Threaded {
 public:
   // Main solver does testing, display, snapshots etc.
   SolverContext(Params<float>& params, Solver<float>& solver) :
       params_(params), solver_param_(solver.param()), index_(0), //
       solver_(&solver) {
-
-    // Main solver runs on current thread
-    init_as_current();
   }
 
   // Other solvers do only training and run in separate threads
-  SolverContext(Params<float>& params, const SolverParameter& solver_param,
-      int index) :
+  SolverContext(Params<float>& params, const SolverParameter& solver_param, int index) :
       params_(params), solver_param_(solver_param), index_(index), solver_() {
 
     solver_param_.clear_display();
@@ -38,9 +34,14 @@ public:
 
   virtual void create_solver() {
     if (index_) {
-      solver_ = new SGDSolver<float>(solver_param_);
-      solver_->test_nets().clear(); // Only training
+      solver_ = new SGDSolver<float>(solver_param_, true);
+      CHECK(!solver_->test_nets().size()); // Only training
     }
+  }
+
+  virtual void delete_solver() {
+    if (index_)
+      delete solver_;
   }
 
   inline Solver<float>* solver() const {
@@ -64,8 +65,7 @@ public:
       SolverContext(params, solver) {
   }
 
-  CPUContext(Params<float>& params, const SolverParameter& solver_param,
-      int index) :
+  CPUContext(Params<float>& params, const SolverParameter& solver_param, int index) :
       SolverContext(params, solver_param, index) {
   }
 
@@ -73,6 +73,12 @@ public:
     create_solver();
     CPUSync<float> sync(params_, *solver_);
     solver_->Solve();
+    // Wait until asked to stop before destroying, monitor might
+    // still be accessing fields
+    if (index_)
+      while (!must_stop())
+        sleep(1);
+    delete_solver();
   }
 };
 
@@ -83,8 +89,7 @@ public:
       SolverContext(params, solver), sync_() {
   }
 
-  GPUContext(Params<float>& params, const SolverParameter& solver_param,
-      int index) :
+  GPUContext(Params<float>& params, const SolverParameter& solver_param, int index) :
       SolverContext(params, solver_param, index), sync_() {
   }
 
@@ -97,6 +102,13 @@ public:
     sync_ = new GPUSync<float>(params_, *solver_);
     sync_->start();
     solver_->Solve();
+    // Wait until asked to stop before destroying, monitor might
+    // still be accessing fields
+    if (index_)
+      while (!must_stop())
+        sleep(1);
+    delete sync_;
+    delete_solver();
   }
 
   virtual void stats(ostream& s) const {
@@ -116,7 +128,7 @@ protected:
 
 // Displays stats about a set of solvers. Also keeps track and updates
 // the global count of iterations (needed to adjust hyperparams).
-class Monitor: public PThread {
+class Monitor: public Threaded {
 public:
   Monitor(Params<float>& params, const vector<SolverContext*>& solvers) :
       params_(params), solvers_(solvers), total_iters_("total") {
@@ -129,12 +141,19 @@ public:
     *s << "Monitor - iters: ";
 
     int total = 0;
+    bool all = true; // TODO remove
     for (int i = 0; i < solvers_.size(); ++i) {
       SolverContext* ctx = solvers_[i];
       int n = ctx->solver() ? ctx->solver()->iter() : 0;
       total += n;
       if (s)
         *s << n << ", ";
+      if (!n)
+        all = false;
+    }
+    if (all) {
+      //cudaProfilerStart();
+      //LOG(INFO)<< "Started profiler\n";
     }
     params_.iterations(total);
     total_iters_.value(total);
@@ -149,7 +168,7 @@ public:
   void run() {
     int every_seconds = 10;
     time_t start = time(0);
-    for (;;) {
+    while (!must_stop()) {
       sleep(every_seconds);
 
       ostringstream s;

@@ -17,9 +17,9 @@ namespace caffe {
 template <typename Dtype>
 class Solver {
  public:
-  explicit Solver(const SolverParameter& param);
+  explicit Solver(const SolverParameter& param, bool skip_test_nets);
   explicit Solver(const string& param_file);
-  void Init(const SolverParameter& param);
+  void Init(const SolverParameter& param, bool skip_test_nets);
   void InitTrainNet();
   void InitTestNets();
   // The main entry of the solver function. In default, iter will be zero. Pass
@@ -29,7 +29,7 @@ class Solver {
   virtual ~Solver() {}
   inline const SolverParameter& param() const { return param_; }
   inline shared_ptr<Net<Dtype> > net() { return net_; }
-  inline vector<shared_ptr<Net<Dtype> > >& test_nets() {
+  inline const vector<shared_ptr<Net<Dtype> > >& test_nets() {
     return test_nets_;
   }
   inline int iter() { return iter_; }
@@ -77,8 +77,8 @@ class Solver {
 template <typename Dtype>
 class SGDSolver : public Solver<Dtype> {
  public:
-  explicit SGDSolver(const SolverParameter& param)
-      : Solver<Dtype>(param) {}
+  explicit SGDSolver(const SolverParameter& param, bool skip_test_nets = false)
+      : Solver<Dtype>(param, skip_test_nets) {}
   explicit SGDSolver(const string& param_file)
       : Solver<Dtype>(param_file) {}
 

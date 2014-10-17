@@ -173,6 +173,7 @@ GPUSync<Dtype>::GPUSync(Params<Dtype>& params, Solver<Dtype>& solver) :
 
 template<typename Dtype>
 GPUSync<Dtype>::~GPUSync() {
+  stop();
   CUDA_CHECK(cudaFree((void* ) last_));
   CUDA_CHECK(cudaFree((void* ) gpu_));
 }
@@ -181,7 +182,9 @@ template<typename Dtype>
 void GPUSync<Dtype>::run() {
   CUDA_CHECK(cudaSetDevice(device_));
   cudaStream_t stream;
-  cudaStreamCreate(&stream);
+  int least, greatest;
+  cudaDeviceGetStreamPriorityRange(&least, &greatest);
+  cudaStreamCreateWithPriority(&stream, cudaStreamNonBlocking, least);
 
   // Current cpu values when invoking kernel, gradients on the way back
   Dtype* chunk;
@@ -194,7 +197,7 @@ void GPUSync<Dtype>::run() {
   const cudaMemcpyKind get = cudaMemcpyDeviceToHost;
   uint32_t index = 0;
 
-  for (;;) {
+  while (!must_stop()) {
     const size_t off = index * CHUNK;
     CUDA_CHECK(cudaMemcpyAsync(chunk, &cpu_[off], csize, put, stream));
     GPUSync_kernel<Dtype>(gpu_, last_, chunk, off, stream);

@@ -62,20 +62,23 @@ void ImageDataLayer<Dtype>::DataLayerSetUp(const vector<Blob<Dtype>*>& bottom,
   const int batch_size = this->layer_param_.image_data_param().batch_size();
   if (crop_size > 0) {
     top[0]->Reshape(batch_size, datum.channels(), crop_size, crop_size);
-    this->prefetch_data_.Reshape(batch_size, datum.channels(), crop_size,
-                                 crop_size);
+    for(int i = 0; i < this->PREFETCH_COUNT; ++i)
+      this->prefetch_[i].data_.Reshape(batch_size, datum.channels(), crop_size,
+          crop_size);
   } else {
     top[0]->Reshape(batch_size, datum.channels(), datum.height(),
                        datum.width());
-    this->prefetch_data_.Reshape(batch_size, datum.channels(), datum.height(),
-        datum.width());
+    for(int i = 0; i < this->PREFETCH_COUNT; ++i)
+      this->prefetch_[i].data_.Reshape(batch_size, datum.channels(), datum.height(),
+          datum.width());
   }
   LOG(INFO) << "output data size: " << top[0]->num() << ","
       << top[0]->channels() << "," << top[0]->height() << ","
       << top[0]->width();
   // label
   top[1]->Reshape(batch_size, 1, 1, 1);
-  this->prefetch_label_.Reshape(batch_size, 1, 1, 1);
+  for(int i = 0; i < this->PREFETCH_COUNT; ++i)
+    this->prefetch_[i].label_.Reshape(batch_size, 1, 1, 1);
   // datum size
   this->datum_channels_ = datum.channels();
   this->datum_height_ = datum.height();
@@ -90,13 +93,13 @@ void ImageDataLayer<Dtype>::ShuffleImages() {
   shuffle(lines_.begin(), lines_.end(), prefetch_rng);
 }
 
-// This function is used to create a thread that prefetches the data.
+// This function is called on prefetch thread
 template <typename Dtype>
-void ImageDataLayer<Dtype>::InternalThreadEntry() {
+void ImageDataLayer<Dtype>::load_batch(Batch<Dtype>* batch) {
   Datum datum;
-  CHECK(this->prefetch_data_.count());
-  Dtype* top_data = this->prefetch_data_.mutable_cpu_data();
-  Dtype* top_label = this->prefetch_label_.mutable_cpu_data();
+  CHECK(batch->data_.count());
+  Dtype* top_data = batch->data_.mutable_cpu_data();
+  Dtype* top_label = batch->label_.mutable_cpu_data();
   ImageDataParameter image_data_param = this->layer_param_.image_data_param();
   const int batch_size = image_data_param.batch_size();
   const int new_height = image_data_param.new_height();

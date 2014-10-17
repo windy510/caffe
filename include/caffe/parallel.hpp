@@ -98,38 +98,24 @@ public:
   }
 };
 
-// Helper to write components running in their own threads.
-// TODO merge with Caffe Thread
-class PThread {
-public:
-  PThread() {
-    memset(&thread_, 0, sizeof(pthread_t));
-  }
-
-  virtual ~PThread() {
-  }
-
-  // In case a component needs to run on an existing thread
-  void init_as_current() {
-    thread_ = pthread_self();
-  }
-
+// Helper to write components running in their own threads
+class Threaded: public InternalThread {
+ public:
   virtual void start() {
-    CHECK(!pthread_create(&thread_, NULL, run, this));
+    StartInternalThread();
+  }
+  virtual void stop() {
+    StopInternalThread();
   }
 
   virtual void run() = 0;
 
-protected:
-  static void* run(void* ptr) {
-    PThread* t = (PThread*) ptr;
-    t->run();
-    return NULL;
+ protected:
+  void InternalThreadEntry() {
+    run();
   }
 
-  pthread_t thread_;
-
-DISABLE_COPY_AND_ASSIGN(PThread);
+DISABLE_COPY_AND_ASSIGN(Threaded);
 };
 
 // Helper for perf metrics
@@ -148,11 +134,11 @@ public:
     value_ = value;
   }
 
-  Meter& operator++() {
+  inline Meter& operator++() {
     value_++;
     return *this;
   }
-  Meter operator++(int) {
+  inline Meter operator++(int) {
     Meter tmp(*this);
     operator++();
     return tmp;
@@ -313,7 +299,7 @@ protected:
 
   Meter sent_, recv_;
 
-  DISABLE_COPY_AND_ASSIGN(Ring);
+DISABLE_COPY_AND_ASSIGN(Ring);
 };
 
 // High performance synchronization using raw sockets and user-space networking
@@ -327,8 +313,8 @@ public:
 
   static const int CHUNK = (ETH_DATA_LEN - MSG_DATA) / sizeof(Dtype);
 
-  RawSync(const Params<Dtype>& params,//
-      const vector<string>& mac_addresses,//
+  RawSync(const Params<Dtype>& params, //
+      const vector<string>& mac_addresses, //
       const vector<string>& secondary_macs);
 
   void run();

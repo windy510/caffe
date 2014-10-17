@@ -147,6 +147,15 @@ int main(int argc, char** argv) {
 
   // Run main on current thread
   solvers[0]->run();
+
+  monitor.stop();
+  LOG(INFO)<< "Monitor stop\n";
+
+  for (int i = 1; i < solvers.size(); ++i)
+    solvers[i]->stop();
+
+  for (int i = 1; i < solvers.size(); ++i)
+    delete solvers[i];
 }
 
 #endif

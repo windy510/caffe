@@ -14,9 +14,9 @@
 namespace caffe {
 
 template <typename Dtype>
-Solver<Dtype>::Solver(const SolverParameter& param)
+Solver<Dtype>::Solver(const SolverParameter& param, bool skip_test_nets)
     : iter_(), iter_total_(&iter_), net_() {
-  Init(param);
+  Init(param, skip_test_nets);
 }
 
 template <typename Dtype>
@@ -24,11 +24,11 @@ Solver<Dtype>::Solver(const string& param_file)
     : iter_(), iter_total_(&iter_), net_() {
   SolverParameter param;
   ReadProtoFromTextFile(param_file, &param);
-  Init(param);
+  Init(param, false);
 }
 
 template <typename Dtype>
-void Solver<Dtype>::Init(const SolverParameter& param) {
+void Solver<Dtype>::Init(const SolverParameter& param, bool skip_test_nets) {
   LOG(INFO) << "Initializing solver from parameters: " << std::endl
             << param.DebugString();
   param_ = param;
@@ -42,7 +42,8 @@ void Solver<Dtype>::Init(const SolverParameter& param) {
   }
   // Scaffolding code
   InitTrainNet();
-  InitTestNets();
+  if(!skip_test_nets)
+    InitTestNets();
   LOG(INFO) << "Solver scaffolding done.";
 }
 
