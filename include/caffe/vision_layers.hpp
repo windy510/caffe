@@ -246,6 +246,7 @@ class LRNLayer : public Layer<Dtype> {
   int pre_pad_;
   Dtype alpha_;
   Dtype beta_;
+  Dtype k_;
   int num_;
   int channels_;
   int height_;
@@ -318,6 +319,7 @@ class PoolingLayer : public Layer<Dtype> {
   int channels_;
   int height_, width_;
   int pooled_height_, pooled_width_;
+  bool global_pooling_;
   Blob<Dtype> rand_idx_;
   Blob<int> max_idx_;
 };
@@ -337,6 +339,9 @@ class CuDNNPoolingLayer : public PoolingLayer<Dtype> {
   virtual void Reshape(const vector<Blob<Dtype>*>& bottom,
       const vector<Blob<Dtype>*>& top);
   virtual ~CuDNNPoolingLayer();
+  // Currently, cuDNN does not support the extra top blob.
+  virtual inline int MinTopBlobs() const { return -1; }
+  virtual inline int ExactNumTopBlobs() const { return 1; }
 
  protected:
   virtual void Forward_gpu(const vector<Blob<Dtype>*>& bottom,

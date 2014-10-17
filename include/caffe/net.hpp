@@ -11,6 +11,9 @@
 #include "caffe/common.hpp"
 #include "caffe/layer.hpp"
 #include "caffe/proto/caffe.pb.h"
+#ifdef TIMING
+#include "caffe/util/benchmark.hpp"
+#endif
 
 namespace caffe {
 
@@ -76,9 +79,16 @@ class Net {
   void Reshape();
 
   Dtype ForwardBackward(const vector<Blob<Dtype>* > & bottom) {
+    #ifdef TIMING
+    Timer timer;
+    timer.Start();
+    #endif
     Dtype loss;
     Forward(bottom, &loss);
     Backward();
+    #ifdef TIMING
+    LOG(INFO) << "ForwardBackward Time: " << timer.MilliSeconds() << "ms.";
+    #endif
     return loss;
   }
 
@@ -181,6 +191,12 @@ class Net {
 
   /// @brief Get misc parameters, e.g. the LR multiplier and weight decay.
   void GetLearningRateAndWeightDecay();
+
+  // @brief Loads imports, for modular network definitions
+  static void LoadImports(const NetParameter& source, NetParameter& target,
+      const string& pwd);
+  // @brief Resolves a layer or blob name referenced by an import, e.g. "../data"
+  static string ResolveImportName(const string& path, const string& pwd);
 
   /// @brief Individual layers in the net
   vector<shared_ptr<Layer<Dtype> > > layers_;
