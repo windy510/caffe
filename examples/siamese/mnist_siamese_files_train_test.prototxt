@@ -322,17 +322,35 @@ layers {
 }
 
 layers {
-  name: "relu2"
-  type: RELU
-  bottom: "diff"
-  top: "diff"
-}
-
-layers {
   name: "ip3"
   type: INNER_PRODUCT
   bottom: "diff"
   top: "ip3"
+  blobs_lr: 1
+  blobs_lr: 2
+  inner_product_param {
+    num_output: 10
+    weight_filler {
+      type: "xavier"
+    }
+    bias_filler {
+      type: "constant"
+    }
+  }
+}
+
+layers {
+  name: "relu2"
+  type: RELU
+  bottom: "ip3"
+  top: "ip3"
+}
+
+layers {
+  name: "ip4"
+  type: INNER_PRODUCT
+  bottom: "ip3"
+  top: "ip4"
   blobs_lr: 1
   blobs_lr: 2
   inner_product_param {
@@ -349,7 +367,7 @@ layers {
 layers {
     name: "loss"
     type: HINGE_LOSS
-    bottom: "ip3"
+    bottom: "ip4"
     bottom: "label_a"
     bottom: "label_b"
     top: "loss"
@@ -358,7 +376,7 @@ layers {
 layers {
   name: "accuracy"
   type: ACCURACY
-  bottom: "ip3"
+  bottom: "ip4"
   bottom: "label_a"
   bottom: "label_b"
   top: "accuracy"
