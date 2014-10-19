@@ -167,6 +167,23 @@ layers {
   param: "ip2_w"
   param: "ip2_b"
 }
+layers {
+  name: "accuracy_a"
+  type: ACCURACY
+  bottom: "ip2_a"
+  bottom: "label_a"
+  top: "accuracy_a"
+  include: { phase: TEST }
+}
+layers {
+  name: "loss_a"
+  type: SOFTMAX_LOSS
+  bottom: "ip2_a"
+  bottom: "label_a"
+  top: "loss_a"
+}
+
+
 
 layers {
   name: "conv1_b"
@@ -275,6 +292,21 @@ layers {
   }
   param: "ip2_w"
   param: "ip2_b"
+}
+layers {
+  name: "accuracy_b"
+  type: ACCURACY
+  bottom: "ip2_b"
+  bottom: "label_b"
+  top: "accuracy_b"
+  include: { phase: TEST }
+}
+layers {
+  name: "loss_b"
+  type: SOFTMAX_LOSS
+  bottom: "ip2_b"
+  bottom: "label_b"
+  top: "loss_b"
 }
 
 layers {
