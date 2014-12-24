@@ -4,9 +4,8 @@
 #include <string>
 #include <utility>
 #include <vector>
-#include <map>
 
-#include "boost/scoped_ptr.hpp"
+#include "boost/weak_ptr.hpp"
 #include "hdf5.h"
 
 #include "caffe/blob.hpp"
@@ -20,6 +19,8 @@
 #include "caffe/util/blocking_queue.hpp"
 
 namespace caffe {
+
+using boost::weak_ptr;
 
 /**
  * @brief Provides base for data layers that feed blobs to the Net.
@@ -55,15 +56,17 @@ class BaseDataLayer : public Layer<Dtype> {
 };
 
 template <typename Dtype>
+class Batch {
+ public:
+  Blob<Dtype> data_, label_;
+};
+
+template <typename Dtype>
 class BasePrefetchingDataLayer :
     public BaseDataLayer<Dtype>, public InternalThread {
  public:
-  explicit BasePrefetchingDataLayer(const LayerParameter& param)
-      : BaseDataLayer<Dtype>(param), free_(), full_() {
-    for(int i = 0; i < PREFETCH_COUNT; ++i)
-      free_.push(&prefetch_[i]);
-  }
-  virtual ~BasePrefetchingDataLayer() {}
+  explicit BasePrefetchingDataLayer(const LayerParameter& param);
+  virtual ~BasePrefetchingDataLayer();
   // LayerSetUp: implements common data layer setup functionality, and calls
   // DataLayerSetUp to do special data layer setup for individual layer types.
   // This method may not be overridden.
@@ -75,29 +78,70 @@ class BasePrefetchingDataLayer :
   virtual void Forward_gpu(const vector<Blob<Dtype>*>& bottom,
       const vector<Blob<Dtype>*>& top);
 
-  virtual void CreatePrefetchThread();
-  virtual void JoinPrefetchThread();
-
  protected:
-  static const int PREFETCH_COUNT = 8;
-
   virtual void InternalThreadEntry();
   virtual void load_batch(Batch<Dtype>* batch) = 0;
 
+  // Prefetches batches (asynchronously if to GPU memory)
+  static const int PREFETCH_COUNT = 4;
   Batch<Dtype> prefetch_[PREFETCH_COUNT];
-  blocking_queue<Batch<Dtype>*> free_;
-  blocking_queue<Batch<Dtype>*> full_;
+  blocking_queue<Batch<Dtype>*> prefetch_free_;
+  blocking_queue<Batch<Dtype>*> prefetch_full_;
   int device_;
 
   Blob<Dtype> transformed_data_;
 };
 
-template <typename Dtype>
-class DataLayer : public BasePrefetchingDataLayer<Dtype> {
+// Single database context per file, prefetches datums to host memory that
+// can be read by multiple data layers.
+class DataLoader {
  public:
-  explicit DataLayer(const LayerParameter& param)
-      : BasePrefetchingDataLayer<Dtype>(param) {}
-  virtual ~DataLayer();
+  DataLoader(const DataParameter& param, int index,
+             blocking_queue<Datum*>* free = NULL,
+             blocking_queue<Datum*>* full = NULL);
+  ~DataLoader();
+
+  inline blocking_queue<Datum*>* free() {
+    return body_.get()->free_;
+  }
+  inline blocking_queue<Datum*>* full() {
+    return body_.get()->full_;
+  }
+
+ protected:
+  class Body: public InternalThread {
+   public:
+    Body(const DataParameter& param, int index,
+         blocking_queue<Datum*>* free,
+         blocking_queue<Datum*>* full);
+    ~Body();
+
+    void InternalThreadEntry();
+
+    shared_ptr<Dataset<string, Datum> > dataset_;
+    Dataset<string, Datum>::const_iterator iter_;
+
+    blocking_queue<Datum*>* free_;
+    blocking_queue<Datum*>* full_;
+    bool own_free_full_;
+
+    DISABLE_COPY_AND_ASSIGN(Body);
+  };
+
+  static map<string, weak_ptr<Body> > instances_;
+  static boost::mutex instances_mutex_;
+
+  const string source_;
+  shared_ptr<Body> body_;
+
+  DISABLE_COPY_AND_ASSIGN(DataLoader);
+};
+
+template <typename Dtype>
+class DataLayer: public BasePrefetchingDataLayer<Dtype> {
+ public:
+  explicit DataLayer(const LayerParameter& param);
+  virtual ~DataLayer() {}
   virtual void DataLayerSetUp(const vector<Blob<Dtype>*>& bottom,
       const vector<Blob<Dtype>*>& top);
 
@@ -109,10 +153,11 @@ class DataLayer : public BasePrefetchingDataLayer<Dtype> {
   virtual inline int MaxTopBlobs() const { return 2; }
 
  protected:
-  virtual void load_batch(Batch<Dtype>* batch);
+  blocking_queue<Datum*>* loaders_free_;
+  blocking_queue<Datum*>* loaders_full_;
 
-  shared_ptr<Dataset<string, Datum> > dataset_;
-  Dataset<string, Datum>::const_iterator iter_;
+  virtual void load_batch(Batch<Dtype>* batch);
+  vector<shared_ptr<DataLoader> > loaders_;
 };
 
 /**

@@ -5,7 +5,8 @@ layers {
   top: "data"
   top: "label"
   data_param {
-    source: "/raid/imagenet_1000_train"
+    source: "/scratch/ilsvrc12/imagenet_1000_train"
+    source: "/data/shared/ilsvrc12/imagenet_1000_train"
     backend: LMDB
     rand_skip: 10000
     batch_size: 256
@@ -23,7 +24,7 @@ layers {
   top: "data"
   top: "label"
   data_param {
-    source: "/raid/imagenet_1000_val"
+    source: "/scratch/ilsvrc12/imagenet_1000_val"
     backend: LMDB
     batch_size: 50
   }

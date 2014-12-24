@@ -16,31 +16,31 @@ using namespace caffe;
 // Context for a solver running in a thread. Both initialization and run
 // of the solver are done on the thread, to point to the same instance of the
 // thread-local Caffe singleton.
-class SolverContext: public Threaded {
-public:
+class SolverContext : public Threaded {
+ public:
   // Main solver does testing, display, snapshots etc.
-  SolverContext(Params<float>& params, Solver<float>& solver) :
-      params_(params), solver_param_(solver.param()), index_(0), //
-      solver_(&solver) {
-  }
+  SolverContext(const Params<float>& params,
+                const SolverParameter& solver_param, Solver<float>* solver)
+      : params_(params),
+        solver_param_(solver_param),
+        worker_(solver == NULL),
+        solver_(solver) {
 
-  // Other solvers do only training and run in separate threads
-  SolverContext(Params<float>& params, const SolverParameter& solver_param, int index) :
-      params_(params), solver_param_(solver_param), index_(index), solver_() {
-
-    solver_param_.clear_display();
-    solver_param_.clear_snapshot();
+    if (worker_) {
+      solver_param_.clear_display();
+      solver_param_.clear_snapshot();
+    }
   }
 
   virtual void create_solver() {
-    if (index_) {
+    if (worker_) {
       solver_ = new SGDSolver<float>(solver_param_, true);
-      CHECK(!solver_->test_nets().size()); // Only training
+      CHECK(!solver_->test_nets().size());  // Only training
     }
   }
 
   virtual void delete_solver() {
-    if (index_)
+    if (worker_)
       delete solver_;
   }
 
@@ -51,63 +51,86 @@ public:
   virtual void stats(ostream& s) const {
   }
 
-protected:
-  Params<float>& params_;
+ protected:
+  const Params<float>& params_;
   SolverParameter solver_param_;
-  const int index_;
-  Solver<float>* solver_; // TODO delete in thread
+  const bool worker_;
+  Solver<float>* solver_;
 };
 
 // Runs a CPU solver on a thread
-class CPUContext: public SolverContext {
-public:
-  CPUContext(Params<float>& params, Solver<float>& solver) :
-      SolverContext(params, solver) {
-  }
-
-  CPUContext(Params<float>& params, const SolverParameter& solver_param, int index) :
-      SolverContext(params, solver_param, index) {
+class CPUContext : public SolverContext {
+ public:
+  CPUContext(const Params<float>& params, const SolverParameter& solver_param,
+             Solver<float>* solver = NULL)
+      : SolverContext(params, solver_param, solver) {
   }
 
   void run() {
     create_solver();
-    CPUSync<float> sync(params_, *solver_);
+    params_.configure(solver_);
     solver_->Solve();
     // Wait until asked to stop before destroying, monitor might
     // still be accessing fields
-    if (index_)
+    if (worker_)
       while (!must_stop())
         sleep(1);
     delete_solver();
   }
 };
 
+#ifndef CPU_ONLY
+
 // Runs a GPU solver on a thread
-class GPUContext: public SolverContext {
-public:
-  GPUContext(Params<float>& params, Solver<float>& solver) :
-      SolverContext(params, solver), sync_() {
-  }
-
-  GPUContext(Params<float>& params, const SolverParameter& solver_param, int index) :
-      SolverContext(params, solver_param, index), sync_() {
-  }
-
-  inline GPUSync<float>* sync() const {
-    return sync_;
+class GPUContext : public SolverContext {
+ public:
+  GPUContext(const Params<float>& params, const SolverParameter& solver_param,
+               GPUParams<float>* gpu_params, Solver<float>* solver = NULL)
+      : SolverContext(params, solver_param, solver),
+        gpu_params_(gpu_params) {
   }
 
   void run() {
     create_solver();
-    sync_ = new GPUSync<float>(params_, *solver_);
+    gpu_params_->configure(solver_);
+    solver_->Solve();
+    // Wait until asked to stop before destroying, monitor might
+    // still be accessing fields
+    if (worker_)
+      while (!must_stop())
+        sleep(1);
+    delete_solver();
+  }
+
+ protected:
+  GPUParams<float>* gpu_params_;
+};
+
+// Runs a GPU solver on a thread with CPU sync
+class CPUGPUContext : public SolverContext {
+ public:
+  CPUGPUContext(const Params<float>& params,
+                const SolverParameter& solver_param, Solver<float>* solver =
+                NULL)
+      : SolverContext(params, solver_param, solver),
+        gpu_params_(),
+        sync_() {
+  }
+
+  void run() {
+    create_solver();
+    gpu_params_ = new GPUParams<float>(params_, solver_param_.device_id());
+    sync_ = new CPUGPUSync<float>(*gpu_params_);
+    gpu_params_->configure(solver_);
     sync_->start();
     solver_->Solve();
     // Wait until asked to stop before destroying, monitor might
     // still be accessing fields
-    if (index_)
+    if (worker_)
       while (!must_stop())
         sleep(1);
     delete sync_;
+    delete gpu_params_;
     delete_solver();
   }
 
@@ -122,16 +145,21 @@ public:
     s << ", ";
   }
 
-protected:
-  GPUSync<float>* sync_;
+ protected:
+  GPUParams<float>* gpu_params_;
+  CPUGPUSync<float>* sync_;
 };
+
+#endif
 
 // Displays stats about a set of solvers. Also keeps track and updates
 // the global count of iterations (needed to adjust hyperparams).
-class Monitor: public Threaded {
-public:
-  Monitor(Params<float>& params, const vector<SolverContext*>& solvers) :
-      params_(params), solvers_(solvers), total_iters_("total") {
+class Monitor : public Threaded {
+ public:
+  Monitor(Params<float>& params, const vector<SolverContext*>& solvers)
+      : params_(params),
+        solvers_(solvers),
+        total_iters_("total") {
   }
 
   virtual ~Monitor() {
@@ -141,7 +169,7 @@ public:
     *s << "Monitor - iters: ";
 
     int total = 0;
-    bool all = true; // TODO remove
+    bool all = true;  // TODO remove
     for (int i = 0; i < solvers_.size(); ++i) {
       SolverContext* ctx = solvers_[i];
       int n = ctx->solver() ? ctx->solver()->iter() : 0;

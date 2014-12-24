@@ -30,7 +30,7 @@ namespace caffe {
 
 template <typename Dtype>
 WindowDataLayer<Dtype>::~WindowDataLayer<Dtype>() {
-  this->JoinPrefetchThread();
+  this->InternalThread::StopInternalThread();
 }
 
 template <typename Dtype>
@@ -183,7 +183,7 @@ void WindowDataLayer<Dtype>::DataLayerSetUp(const vector<Blob<Dtype>*>& bottom,
   // label
   top[1]->Reshape(batch_size, 1, 1, 1);
   for(int i = 0; i < this->PREFETCH_COUNT; ++i)
-	  this->prefetch_label_.Reshape(batch_size, 1, 1, 1);
+    this->prefetch_[i].label_.Reshape(batch_size, 1, 1, 1);
 
   // data mean
   has_mean_file_ = this->transform_param_.has_mean_file();
@@ -231,8 +231,8 @@ void WindowDataLayer<Dtype>::load_batch(Batch<Dtype>* batch) {
   double read_time = 0;
   double trans_time = 0;
   CPUTimer timer;
-  Dtype* top_data = this->prefetch_data_.mutable_cpu_data();
-  Dtype* top_label = this->prefetch_label_.mutable_cpu_data();
+  Dtype* top_data = batch->data_.mutable_cpu_data();
+  Dtype* top_label = batch->label_.mutable_cpu_data();
   const Dtype scale = this->layer_param_.window_data_param().scale();
   const int batch_size = this->layer_param_.window_data_param().batch_size();
   const int context_pad = this->layer_param_.window_data_param().context_pad();

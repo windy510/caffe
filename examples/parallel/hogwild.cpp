@@ -59,9 +59,9 @@ int main(int argc, char** argv) {
 
   // Create contexts
   vector<SolverContext*> solvers(cores);
-  solvers[0] = new CPUContext(params, main);
+  solvers[0] = new CPUContext(params, solver_param, &main);
   for (int i = 1; i < cores; ++i) {
-    solvers[i] = new CPUContext(params, solver_param, i);
+    solvers[i] = new CPUContext(params, solver_param);
     solvers[i]->start();
   }
 
@@ -71,7 +71,7 @@ int main(int argc, char** argv) {
 
   // Run main on current thread
   solvers[0]->run();
-  
+
   monitor.stop();
   LOG(INFO)<< "Monitor stop\n";
 
@@ -79,4 +79,5 @@ int main(int argc, char** argv) {
     solvers[i]->stop();
 
   for (int i = 1; i < solvers.size(); ++i)
-    delete solvers[i];}
+    delete solvers[i];
+}

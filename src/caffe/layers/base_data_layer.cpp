@@ -27,50 +27,56 @@ void BaseDataLayer<Dtype>::LayerSetUp(const vector<Blob<Dtype>*>& bottom,
 }
 
 template <typename Dtype>
+BasePrefetchingDataLayer<Dtype>::BasePrefetchingDataLayer(
+    const LayerParameter& param)
+    : BaseDataLayer<Dtype>(param),
+      prefetch_free_(), prefetch_full_(), device_() {
+  for(int i = 0; i < PREFETCH_COUNT; ++i)
+    prefetch_free_.push(&prefetch_[i]);
+}
+
+template <typename Dtype>
 void BasePrefetchingDataLayer<Dtype>::LayerSetUp(
     const vector<Blob<Dtype>*>& bottom, const vector<Blob<Dtype>*>& top) {
   BaseDataLayer<Dtype>::LayerSetUp(bottom, top);
-  // Now, start the prefetch thread. Before calling prefetch, we make two
-  // cpu_data calls so that the prefetch thread does not accidentally make
-  // simultaneous cudaMalloc calls when the main thread is running. In some
-  // GPUs this seems to cause failures if we do not so.
-  for(int i = 0; i < PREFETCH_COUNT; ++i)
-    prefetch_[i].data_.mutable_cpu_data();
-  if (this->output_labels_)
-    for(int i = 0; i < PREFETCH_COUNT; ++i)
-      prefetch_[i].label_.mutable_cpu_data();
 
+  // Before starting the prefetch thread, we make cpu_data and gpu_data
+  // calls so that the prefetch thread does not accidentally make simultaneous
+  // cudaMalloc calls when the main thread is running. In some GPUs this
+  // seems to cause failures if we do not so.
+  for(int i = 0; i < PREFETCH_COUNT; ++i) {
+    prefetch_[i].data_.mutable_cpu_data();
+    if (this->output_labels_) {
+      prefetch_[i].label_.mutable_cpu_data();
+    }
+  }
   switch (Caffe::mode()) {
     case Caffe::CPU:
       device_ = -1;
       break;
     case Caffe::GPU:
 #ifndef CPU_ONLY
-      CUDA_CHECK(cudaGetDevice(&device_));
-      for(int i = 0; i < PREFETCH_COUNT; ++i)
+      for(int i = 0; i < PREFETCH_COUNT; ++i) {
         prefetch_[i].data_.mutable_gpu_data();
-      if (this->output_labels_)
-        for(int i = 0; i < PREFETCH_COUNT; ++i)
+        if (this->output_labels_) {
           prefetch_[i].label_.mutable_gpu_data();
+        }
+      }
+      CUDA_CHECK(cudaGetDevice(&device_));
 #endif
       break;
   }
 
   DLOG(INFO) << "Initializing prefetch";
-  this->CreatePrefetchThread();
+  this->phase_ = Caffe::phase();
+  this->data_transformer_.InitRand();
+  CHECK(StartInternalThread()) << "Thread execution failed";
   DLOG(INFO) << "Prefetch initialized.";
 }
 
 template <typename Dtype>
-void BasePrefetchingDataLayer<Dtype>::CreatePrefetchThread() {
-  this->phase_ = Caffe::phase();
-  this->data_transformer_.InitRand();
-  CHECK(StartInternalThread()) << "Thread execution failed";
-}
-
-template <typename Dtype>
-void BasePrefetchingDataLayer<Dtype>::JoinPrefetchThread() {
-  CHECK(WaitForInternalThreadToExit()) << "Thread joining failed";
+BasePrefetchingDataLayer<Dtype>::~BasePrefetchingDataLayer() {
+  CHECK(StopInternalThread()) << "Stop thread failed";
 }
 
 template <typename Dtype>
@@ -84,7 +90,7 @@ void BasePrefetchingDataLayer<Dtype>::InternalThreadEntry() {
 #endif
 
   while(!must_stop()) {
-    Batch<Dtype>* batch = free_.pop();
+    Batch<Dtype>* batch = prefetch_free_.pop();
     load_batch(batch);
 #ifndef CPU_ONLY
     if(device_ >= 0) {
@@ -92,24 +98,23 @@ void BasePrefetchingDataLayer<Dtype>::InternalThreadEntry() {
       cudaStreamSynchronize(stream);
     }
 #endif
-    full_.push(batch);
+    prefetch_full_.push(batch);
   }
 }
 
 template <typename Dtype>
 void BasePrefetchingDataLayer<Dtype>::Forward_cpu(
     const vector<Blob<Dtype>*>& bottom, const vector<Blob<Dtype>*>& top) {
-  Batch<Dtype>* batch = full_.pop();
+  Batch<Dtype>* batch = prefetch_full_.pop("Data layer prefetch queue empty");
 
   caffe_copy(batch->data_.count(), batch->data_.cpu_data(),
       top[0]->mutable_cpu_data());
-  DLOG(INFO) << "Prefetch copied";
   if (this->output_labels_) {
     caffe_copy(batch->label_.count(), batch->label_.cpu_data(),
         top[1]->mutable_cpu_data());
   }
 
-  free_.push(batch);
+  prefetch_free_.push(batch);
 }
 
 #ifdef CPU_ONLY

@@ -32,25 +32,40 @@ public:
     return true;
   }
 
-  T pop(bool show = false) {
+  T pop(const string& log_on_wait = "") {
+    boost::mutex::scoped_lock lock(mutex_);
+
+    while (queue_.empty()) {
+      if (!log_on_wait.empty()) {
+        time_t now = time(0);
+        if (now - last_wait_log_ > 5) {
+          last_wait_log_ = now;
+          LOG(INFO) << log_on_wait;
+        }
+      }
+      condition_.wait(lock);
+    }
+
+    T t = queue_.front();
+    queue_.pop();
+    return t;
+  }
+
+  // Return element without removing it
+  T peek() {
     boost::mutex::scoped_lock lock(mutex_);
 
     while (queue_.empty())
       condition_.wait(lock);
 
-    T t = queue_.front();
-    queue_.pop();
-
-//    if(show)
-//      LOG(INFO)<<"pop, size - " <<queue_.size();
-
-    return t;
+    return queue_.front();
   }
 
 private:
   std::queue<T> queue_;
   mutable boost::mutex mutex_;
   boost::condition_variable condition_;
+  time_t last_wait_log_;
 };
 
 }  // namespace caffe

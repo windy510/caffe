@@ -35,11 +35,12 @@ using namespace caffe;
 #ifdef __linux__
 
 // Monitors solvers and network
-class RawMonitor: public Monitor {
-public:
+class RawMonitor : public Monitor {
+ public:
   RawMonitor(Params<float>& params, const vector<SolverContext*>& solvers,
-      RawSync<float>& raw) :
-      Monitor(params, solvers), raw_(raw) {
+             RawSync<float>& raw)
+      : Monitor(params, solvers),
+        raw_(raw) {
   }
 
   void stats(const Ring& r, ostream& s) {
@@ -77,12 +78,12 @@ int main(int argc, char** argv) {
   ::google::InstallFailureSignalHandler();
 
   if (argc < 4 || argc > 5) {
-    printf("Usage: raw.bin solver_proto_file " //
-            "[gpu_id][:gpu_id][...]:cpu_cores "
-            "mac_address[:mac_address][:...] [secondary_mac][:secondary_mac][:...]\n");
-    printf("Raw socket is a privileged operation, either run as root or " //
-            "set the capability on the executable: "
-            "sudo setcap cap_net_raw+ep raw.bin\n");
+    printf("Usage: raw.bin solver_proto_file "  //
+        "[gpu_id][:gpu_id][...]:cpu_cores "
+        "mac_address[:mac_address][:...] [secondary_mac][:secondary_mac][:...]\n");
+    printf("Raw socket is a privileged operation, either run as root or "  //
+        "set the capability on the executable: "
+        "sudo setcap cap_net_raw+ep raw.bin\n");
     return 1;
   }
 
@@ -123,39 +124,46 @@ int main(int argc, char** argv) {
   LOG(INFO)<< "Start training\n";
 
   // Create contexts
-  vector<SolverContext*> solvers(gpus.size() + cores);
-  if (gpus.size())
-    solvers[0] = new GPUContext(params, main);
-  else
-    solvers[0] = new CPUContext(params, main);
+  vector<SolverContext*> contexts(gpus.size() + cores);
+  if (gpus.size()) {
+#ifndef CPU_ONLY
+    contexts[0] = new CPUGPUContext(params, solver_param, &main);
+#else
+    NO_GPU;
+#endif
+  } else {
+    contexts[0] = new CPUContext(params, solver_param, &main);
+  }
+#ifndef CPU_ONLY
   // GPUs
   for (int i = 1; i < gpus.size(); ++i) {
     solver_param.set_device_id(gpus[i]);
-    solvers[i] = new GPUContext(params, solver_param, i);
-    solvers[i]->start();
+    contexts[i] = new CPUGPUContext(params, solver_param);
+    contexts[i]->start();
   }
+#endif
   // CPUs
   solver_param.set_solver_mode(SolverParameter::CPU);
   for (int i = max(1, (int) gpus.size()); i < gpus.size() + cores; ++i) {
-    solvers[i] = new CPUContext(params, solver_param, i);
-    solvers[i]->start();
+    contexts[i] = new CPUContext(params, solver_param);
+    contexts[i]->start();
   }
 
   // Start monitor
-  RawMonitor monitor(params, solvers, raw);
+  RawMonitor monitor(params, contexts, raw);
   monitor.start();
 
   // Run main on current thread
-  solvers[0]->run();
+  contexts[0]->run();
 
   monitor.stop();
   LOG(INFO)<< "Monitor stop\n";
 
-  for (int i = 1; i < solvers.size(); ++i)
-    solvers[i]->stop();
+  for (int i = 1; i < contexts.size(); ++i)
+    contexts[i]->stop();
 
-  for (int i = 1; i < solvers.size(); ++i)
-    delete solvers[i];
+  for (int i = 1; i < contexts.size(); ++i)
+    delete contexts[i];
 }
 
 #endif

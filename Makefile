@@ -1,11 +1,11 @@
 PROJECT := caffe
 
-CONFIG_FILE := Makefile.config
+CONFIG_FILE ?= Makefile.config
 include $(CONFIG_FILE)
 
 BUILD_DIR_LINK := $(BUILD_DIR)
-RELEASE_BUILD_DIR := .$(BUILD_DIR)_release
-DEBUG_BUILD_DIR := .$(BUILD_DIR)_debug
+RELEASE_BUILD_DIR ?= .$(BUILD_DIR)_release
+DEBUG_BUILD_DIR ?= .$(BUILD_DIR)_debug
 
 DEBUG ?= 0
 ifeq ($(DEBUG), 1)
@@ -291,6 +291,11 @@ ifeq ($(CPU_ONLY), 1)
 	COMMON_FLAGS += -DCPU_ONLY
 endif
 
+ifeq ($(RDMA), 1)
+	COMMON_FLAGS += -DRDMA
+	LIBRARIES += ibverbs ibumad
+endif
+
 # BLAS configuration (default = ATLAS)
 BLAS ?= atlas
 ifeq ($(BLAS), mkl)
@@ -497,7 +502,6 @@ $(TEST_ALL_DYNLINK_BIN): $(TEST_MAIN_SRC) $(TEST_OBJS) $(GTEST_OBJ) $(DYNAMIC_NA
 	$(CXX) $(TEST_MAIN_SRC) $(TEST_OBJS) $(GTEST_OBJ) \
 		-o $@ $(LINKFLAGS) $(LDFLAGS) -l$(PROJECT) -Wl,-rpath,$(LIB_BUILD_DIR)
 	@ echo
-
 
 $(TEST_CU_BINS): $(TEST_BIN_DIR)/%.testbin: $(TEST_BUILD_DIR)/%.cuo $(GTEST_OBJ) $(STATIC_NAME) \
 		| $(TEST_BIN_DIR)

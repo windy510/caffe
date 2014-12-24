@@ -18,6 +18,8 @@
 using namespace std;
 using namespace caffe;
 
+#ifndef CPU_ONLY
+
 // Trains a net on multiple GPUs on one box. C.f. GPUSync in parallel.h.
 //
 // Example launch on GPU 0 and 1:
@@ -52,10 +54,10 @@ int main(int argc, char** argv) {
 
   // Create contexts
   vector<SolverContext*> solvers(gpus.size());
-  solvers[0] = new GPUContext(params, main);
+  solvers[0] = new CPUGPUContext(params, solver_param, &main);
   for (int i = 1; i < gpus.size(); ++i) {
     solver_param.set_device_id(gpus[i]);
-    solvers[i] = new GPUContext(params, solver_param, i);
+    solvers[i] = new CPUGPUContext(params, solver_param);
     solvers[i]->start();
   }
 
@@ -75,4 +77,9 @@ int main(int argc, char** argv) {
   for (int i = 1; i < solvers.size(); ++i)
     delete solvers[i];
 }
+
+#else
+int main(int argc, char *argv[]) {
+}
+#endif
 
