@@ -19,7 +19,10 @@ namespace caffe {
 
 template<typename Dtype>
 P2PSync<Dtype>::P2PSync(const GPUParams<Dtype>& params)
-    : params_(params) {
+    : params_(params),
+      chunks_(chunks(params.params().len_used())),
+      calls_("calls", CHUNK * sizeof(Dtype)),
+      cycles_("cycles") {
 
   size_t size = params.params().len_buff() * sizeof(Dtype);
   Dtype* gpu = params.gpu();
@@ -29,28 +32,14 @@ P2PSync<Dtype>::P2PSync(const GPUParams<Dtype>& params)
 
 template<typename Dtype>
 P2PSync<Dtype>::~P2PSync() {
+  stop();
   CUDA_CHECK(cudaFree((void* ) gpu_last_));
 }
 
-//
-
 template<typename Dtype>
-CPUGPUSync<Dtype>::CPUGPUSync(const GPUParams<Dtype>& params)
-    : P2PSync<Dtype>(params),
-      chunks_(chunks(params.params().len_used())),
-      calls_("calls", CHUNK * sizeof(Dtype)),
-      cycles_("cycles") {
-}
-
-template<typename Dtype>
-CPUGPUSync<Dtype>::~CPUGPUSync() {
-  stop();
-}
-
-template<typename Dtype>
-void CPUGPUSync<Dtype>::run() {
+void P2PSync<Dtype>::run() {
   CUDA_CHECK(cudaSetDevice(this->params_.device()));
-  GPUStream < Dtype > gpu_stream;
+  GPUStream<Dtype> gpu_stream;
   const cudaStream_t& stream = gpu_stream.stream();
 
   // Current cpu values when invoking kernel, gradients on the way back
@@ -73,8 +62,8 @@ void CPUGPUSync<Dtype>::run() {
     size_t off = index * CHUNK;
     CUDA_CHECK(cudaMemcpyAsync(buf, &cpu[off], len, put, stream));
     // TODO simpler kernel
-    sync_worker_kernel < Dtype > (gpu, last, &buf, &off, &buf, &get_grads,  //
-    0, 1, stream, CHUNK);
+    sync_worker_kernel<Dtype>(gpu, last, &buf, &off, &buf, &get_grads,  //
+                              0, 1, stream, CHUNK);
     CUDA_CHECK(cudaMemcpyAsync(tmp, buf, len, get, stream));
     cudaStreamSynchronize(stream);
     for (size_t i = 0; i < CHUNK; ++i)
@@ -90,8 +79,7 @@ void CPUGPUSync<Dtype>::run() {
   CUDA_CHECK(cudaFree((void* ) buf));
 }
 
-}
-
 INSTANTIATE_CLASS(P2PSync);
+}
 
 #endif
