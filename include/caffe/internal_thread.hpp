@@ -33,6 +33,11 @@ class InternalThread {
     return must_stop_;
   }
 
+  // TODO merge with data_queues
+  bool must_stop() {
+    return false;
+  }
+
  protected:
   /* Implement this method in your subclass
       with the code you want your thread to run. */
