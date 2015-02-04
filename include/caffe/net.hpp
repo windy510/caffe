@@ -162,6 +162,18 @@ class Net {
   inline const vector<int>& output_blob_indices() const {
     return net_output_blob_indices_;
   }
+  inline Dtype* gradient_sink() const {
+    return gradient_sink_;
+  }
+  inline void gradient_sink(Dtype* value) {
+    gradient_sink_ = value;
+  }
+  inline Dtype* gradient_sink_data_start() const {
+    return gradient_sink_data_start_;
+  }
+  inline void gradient_sink_data_start(Dtype* value) {
+    gradient_sink_data_start_ = value;
+  }
   bool has_blob(const string& blob_name) const;
   const shared_ptr<Blob<Dtype> > blob_by_name(const string& blob_name) const;
   bool has_layer(const string& layer_name) const;
@@ -249,6 +261,9 @@ class Net {
   size_t memory_used_;
   /// Whether to compute and display debug info for the net.
   bool debug_info_;
+  /// Used for distributed training, accumulates gradients for transfer
+  Dtype* gradient_sink_;
+  Dtype* gradient_sink_data_start_;
 
   DISABLE_COPY_AND_ASSIGN(Net);
 };

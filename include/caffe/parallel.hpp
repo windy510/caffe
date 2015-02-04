@@ -1,7 +1,8 @@
 #ifndef CAFFE_PARALLEL_H_
 #define CAFFE_PARALLEL_H_
 
-#include <boost/date_time/posix_time/posix_time.hpp>
+#include <boost/atomic/atomic.hpp>
+#include <boost/chrono.hpp>
 #include <sstream>
 
 #include "caffe/common.hpp"
@@ -12,12 +13,13 @@
 #include "caffe/proto/caffe.pb.h"
 #include "caffe/internal_thread.hpp"
 
-using boost::posix_time::ptime;
-using boost::posix_time::microsec_clock;
+using boost::chrono::time_point;
+using boost::chrono::steady_clock;
+using boost::chrono::duration;
 
-// The following classes enable data-parallel training, over multiple CPU cores,
-// GPUs, and machines. It uses a form of asynchronous SGD that can independently
-// max out both networking and compute resources.
+// The following classes enable data-parallel training, over multiple CPU
+// cores, GPUs, and machines. It uses asynchronous SGD to independently max out
+// networking and compute resources.
 
 namespace caffe {
 
@@ -54,17 +56,17 @@ class Meter {
         unit_size_(unit_size),  //
         value_(),
         last_(),
-        time_(microsec_clock::local_time()) {
+        time_(steady_clock::now()) {
   }
 
   inline uint64_t value() const {
-    return value_;
+    return value_.load(boost::memory_order_relaxed);
   }
   inline void value(uint64_t value) {
-    value_ = value;
+    value_.store(value);
   }
   inline void operator++(int) {
-    value_++;
+    value_.fetch_add(1, boost::memory_order_relaxed);
   }
 
   void show(std::ostream& s) const;
@@ -72,8 +74,9 @@ class Meter {
  protected:
   const string name_;
   const uint64_t unit_size_;
-  mutable uint64_t value_, last_;
-  mutable ptime time_;  // TODO find a monotonic clock
+  mutable boost::atomic<uint64_t> value_;
+  mutable uint64_t last_;
+  mutable time_point time_;
 
 DISABLE_COPY_AND_ASSIGN(Meter);
 };
@@ -88,10 +91,9 @@ DISABLE_COPY_AND_ASSIGN(Meter);
 template<typename Dtype>
 class Params {
  public:
-  // Allocate a buffer compatible with the given blobs, optionally mapped to a
-  // file (/dev/shm) for multi-process configurations or debugging.
-  Params(const vector<shared_ptr<Blob<Dtype> > >& blobs,  //
-      const string& file_map = "");
+  // Allocate buffers compatible with the given solver, optionally mapped to
+  // file (e.g. in /dev/shm) for multi-process configurations or debugging.
+  Params(SGDSolver<Dtype>* solver, const string& file_map_dir = "");
   virtual ~Params();
 
   inline size_t len_used() const {
@@ -100,8 +102,11 @@ class Params {
   inline size_t len_buff() const {
     return len_buff_;
   }
-  inline Dtype* cpu() const {
-    return cpu_;
+  inline Dtype* data() const {
+    return data_;
+  }
+  inline Dtype* hist() const {
+    return hist_;
   }
   inline int iterations() {
     return iterations_;
@@ -110,15 +115,17 @@ class Params {
     iterations_ = value;
   }
 
-  // Replaces solvers parameters by the shared buffer. Solvers then run on
-  // the same weights without synchronization (Hogwild). See hogwild.cpp in
-  // /examples for details and BLAS requirements.
+  // Replaces solvers parameters by Params's buffers.
   void configure(Solver<Dtype>* solver) const;
+
+  // Align arrays to all potential chunk sizes to avoid boundary checks
+  static size_t align(const size_t len);
 
  protected:
   const size_t len_used_;       // Actually used
   const size_t len_buff_;       // Allocated aligned to potential chunks
-  Dtype* cpu_;
+  Dtype* data_;
+  Dtype* hist_;
   mutable int iterations_;      // Total iterations across solvers
 
   template<typename U>
@@ -143,43 +150,30 @@ class GPUParams {
   inline int device() const {
     return device_;
   }
-  inline Dtype* gpu() const {
-    return gpu_;
+  inline Dtype* data() const {
+    return data_;
+  }
+  inline Dtype* hist() const {
+    return hist_;
   }
 
  protected:
   const Params<Dtype>& params_;
   const int device_;
-  Dtype* gpu_;
+  Dtype* data_;
+  Dtype* hist_;
 
 DISABLE_COPY_AND_ASSIGN(GPUParams);
 };
 
+//
+
+// Syncs params between GPUs on single box.
 template<typename Dtype>
-class GPUStream {
+class P2PSync {
  public:
-  GPUStream();
-  virtual ~GPUStream();
-
-  const cudaStream_t& stream() const {
-    return stream_;
-  }
-
- protected:
-  cudaStream_t stream_;
-
-DISABLE_COPY_AND_ASSIGN(GPUStream);
-};
-
-// Syncs params between host and GPU memory.
-template<typename Dtype>
-class P2PSync : public Threaded {
- public:
-  P2PSync(const GPUParams<Dtype>& params);
-
+  P2PSync(const vector<GPUParams<Dtype>*> params);
   virtual ~P2PSync();
-
-  void run();
 
   inline const Meter& calls() const {
     return calls_;
@@ -196,11 +190,23 @@ class P2PSync : public Threaded {
   static const int CHUNK = 262144;
 
  protected:
-  void push(uint32_t chunk);
+  class P2PEmit : public Threaded {
+   public:
+    P2PEmit(const P2PSync& sync, const vector<GPUParams<Dtype>*> params,
+            int index);
+    virtual ~P2PEmit();
 
-  const uint32_t chunks_;
-  const GPUParams<Dtype>& params_;
-  Dtype* gpu_last_;
+    void run();
+
+    const P2PSync& sync_;
+    const vector<GPUParams<Dtype>*> params_;
+    const int index_;
+    const uint32_t chunks_;
+
+  DISABLE_COPY_AND_ASSIGN(P2PEmit);
+  };
+
+  vector<shared_ptr<P2PEmit>> emits_;
 
   // Perf counters
   Meter calls_, cycles_;

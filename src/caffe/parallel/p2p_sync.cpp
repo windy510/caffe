@@ -13,40 +13,100 @@
 #ifndef CPU_ONLY
 #include <cuda_runtime.h>
 
+// From CUDA samples
+
+inline bool IsGPUCapableP2P(cudaDeviceProp* pProp) {
+#ifdef _WIN32
+  return (bool)(pProp->tccDriver ? true : false);
+#else
+  return (bool) (pProp->major >= 2);
+#endif
+}
+
+inline bool IsAppBuiltAs64() {
+#if defined(__x86_64) || defined(AMD64) || defined(_M_AMD64) || defined(__aarch64__)
+  return 1;
+#else
+  return 0;
+#endif
+}
+
 using namespace std;
 
 namespace caffe {
 
 template<typename Dtype>
-P2PSync<Dtype>::P2PSync(const GPUParams<Dtype>& params)
-    : params_(params),
-      chunks_(chunks(params.params().len_used())),
-      calls_("calls", CHUNK * sizeof(Dtype)),
+P2PSync<Dtype>::P2PSync(const vector<GPUParams<Dtype>*> params)
+    : calls_("calls", CHUNK * sizeof(Dtype)),
       cycles_("cycles") {
 
-  size_t size = params.params().len_buff() * sizeof(Dtype);
-  Dtype* gpu = params.gpu();
-  CUDA_CHECK(cudaMalloc((void** ) &gpu_last_, size));
-  CUDA_CHECK(cudaMemcpy(gpu_last_, gpu, size, cudaMemcpyDeviceToDevice));
+  for (int i = 1; i < params.size(); ++i) {
+    CHECK(params[i].params().len_used() == params[0].params().len_used());
+    CHECK(params[i].params().len_buff() == params[0].params().len_buff());
+  }
+  CHECK(IsAppBuiltAs64()) << ("P2PSync is only supported with on 64-bit OS");
+  for (int i = 0; i < params.size(); ++i) {
+    const int dev = params[i].device();
+    cudaDeviceProp prop;
+    CUDA_CHECK(cudaGetDeviceProperties(&prop, dev));
+    CHECK(IsGPUCapableP2P(&prop)) << "GPU " << dev << " does not support P2P";
+    CHECK(prop.unifiedAddressing) << "GPU " << dev << " does not support UVA";
+  }
+
+  emits_.resize(params.size());
+  for (int i = 0; i < params.size(); ++i) {
+    emits_[i].get().reset(new P2PEmit(params, i));
+  }
 }
 
 template<typename Dtype>
-P2PSync<Dtype>::~P2PSync() {
+P2PSync<Dtype>::P2PEmit::P2PEmit(const P2PSync& sync,
+                                 const vector<GPUParams<Dtype>*> params,
+                                 int index)
+    : sync_(sync),
+      params_(params),
+      index_(index),
+      chunks_(chunks(params[0].params().len_used())) {
+
+  for (int i = 0; i < params.size(); ++i) {
+    if (i != index) {
+      const int device = params[index].device();
+      const int peer = params[i].device();
+      int access;
+      CUDA_CHECK(cudaDeviceCanAccessPeer(&access, device, peer));
+      CHECK(access) << "GPU " << device << " cannot access GPU " << peer;
+    }
+  }
+}
+
+template<typename Dtype>
+P2PSync<Dtype>::P2PEmit::~P2PEmit() {
   stop();
-  CUDA_CHECK(cudaFree((void* ) gpu_last_));
 }
 
 template<typename Dtype>
-void P2PSync<Dtype>::run() {
-  CUDA_CHECK(cudaSetDevice(this->params_.device()));
-  GPUStream<Dtype> gpu_stream;
-  const cudaStream_t& stream = gpu_stream.stream();
+void P2PSync<Dtype>::P2PEmit::P2PEmit::run() {
+  // Create a stream for each device
+  vector<cudaStream_t> streams(params_.size());
+  for (int i = 0; i < params_.size(); ++i) {
+    CUDA_CHECK(cudaSetDevice(this->params_[i].device()));
+    cudaStreamCreateWithFlags(&streams[i], cudaStreamNonBlocking);
+  }
 
-  // Current cpu values when invoking kernel, gradients on the way back
-  Dtype* buf;
-  Dtype* tmp;
-  CUDA_CHECK(cudaMalloc((void** ) &buf, CHUNK * sizeof(Dtype)));
-  CaffeMallocHost((void**) &tmp, CHUNK * sizeof(Dtype));
+  // Enable p2p access to each device
+  CUDA_CHECK(cudaSetDevice(this->params_[index_].device()));
+  for (int i = 0; i < params_.size(); ++i) {
+    if (i != index_) {
+      CUDA_CHECK(cudaDeviceEnablePeerAccess(this->params_[i].device(), 0));
+    }
+  }
+
+  // Allocate weight copy to measure gradient
+  size_t size = params_[index_].params().len_buff() * sizeof(Dtype);
+  Dtype* buffer = params_[index_].buffer();
+  Dtype* copy;
+  CUDA_CHECK(cudaMalloc((void** ) &copy, size));
+  CUDA_CHECK(cudaMemcpy(copy, buffer, size, cudaMemcpyDeviceToDevice));
 
   const size_t len = CHUNK * sizeof(Dtype);
   // Explicit directions for readability
@@ -65,7 +125,7 @@ void P2PSync<Dtype>::run() {
     sync_worker_kernel<Dtype>(gpu, last, &buf, &off, &buf, &get_grads,  //
                               0, 1, stream, CHUNK);
     CUDA_CHECK(cudaMemcpyAsync(tmp, buf, len, get, stream));
-    cudaStreamSynchronize(stream);
+    cudaStreamSynchronize (stream);
     for (size_t i = 0; i < CHUNK; ++i)
       cpu[off + i] += tmp[i];
     if (++index == chunks_) {
@@ -75,8 +135,15 @@ void P2PSync<Dtype>::run() {
     calls_++;
   }
 
-  CaffeFreeHost((void*) tmp);
-  CUDA_CHECK(cudaFree((void* ) buf));
+  CUDA_CHECK(cudaFree((void* ) copy));
+  for (int i = 0; i < params_.size(); ++i) {
+    if (i != index_) {
+      CUDA_CHECK(cudaDeviceDisablePeerAccess(this->params_[i].device()));
+    }
+  }
+  for (int i = 0; i < params_.size(); ++i) {
+    cudaStreamDestroy(streams[i]);
+  }
 }
 
 INSTANTIATE_CLASS(P2PSync);

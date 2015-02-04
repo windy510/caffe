@@ -42,6 +42,7 @@ DEFINE_bool(encoded, false,
 
 int main(int argc, char** argv) {
   ::google::InitGoogleLogging(argv[0]);
+  ::google::InstallFailureSignalHandler();
 
 #ifndef GFLAGS_GFLAGS_H_
   namespace gflags = google;

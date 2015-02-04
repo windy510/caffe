@@ -578,7 +578,33 @@ void Net<Dtype>::BackwardFromTo(int start, int end) {
     if (layer_need_backward_[i]) {
       layers_[i]->Backward(
           top_vecs_[i], bottom_need_backward_[i], bottom_vecs_[i]);
-      if (debug_info_) { BackwardDebugInfo(i); }
+      if (debug_info_) {
+        BackwardDebugInfo(i);
+      }
+      if (gradient_sink_) {
+        vector<shared_ptr<Blob<Dtype> > >& blobs = layers_[i]->blobs();
+        for (int i = 0; i < blobs.size(); ++i) {
+          Blob<Dtype>* blob = blobs[i].get();
+          switch (Caffe::mode()) {
+          case Caffe::CPU: {
+            Dtype* diff = blob->cpu_diff();
+            Dtype* offs = blob->cpu_data() - gradient_sink_data_start_;
+            Dtype* sink = gradient_sink_ + offs;
+            caffe_add(blob->count(), diff, sink, sink);
+            break;
+          }
+          case Caffe::GPU: {
+            Dtype* diff = blob->gpu_diff();
+            size_t offs = blob->gpu_data() - gradient_sink_data_start_;
+            Dtype* sink = gradient_sink_ + offs;
+            caffe_gpu_add(blob->count(), diff, sink, sink);
+            break;
+          }
+          default:
+            LOG(FATAL) << "Unknown caffe mode.";
+          }
+        }
+      }
     }
   }
 }
