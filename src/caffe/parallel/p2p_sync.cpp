@@ -113,17 +113,16 @@ void P2PSync<Dtype>::P2PEmit::P2PEmit::run() {
   const cudaMemcpyKind put = cudaMemcpyHostToDevice;
   const cudaMemcpyKind get = cudaMemcpyDeviceToHost;
   uint32_t index = 0;
-  Dtype* cpu = this->params_.params().cpu();
-  Dtype* gpu = this->params_.gpu();
-  Dtype* last = this->gpu_last_;
-  uint8_t get_grads = true;
+  Dtype* data = this->params_.data();
+  Dtype* hist = this->params_.hist();
+  Dtype* sink = this->params_.sink();
 
   while (!must_stop()) {
     size_t off = index * CHUNK;
     CUDA_CHECK(cudaMemcpyAsync(buf, &cpu[off], len, put, stream));
     // TODO simpler kernel
-    sync_worker_kernel<Dtype>(gpu, last, &buf, &off, &buf, &get_grads,  //
-                              0, 1, stream, CHUNK);
+    sync_worker_kernel < Dtype > (gpu, last, &buf, &off, &buf, &get_grads,  //
+    0, 1, stream, CHUNK);
     CUDA_CHECK(cudaMemcpyAsync(tmp, buf, len, get, stream));
     cudaStreamSynchronize (stream);
     for (size_t i = 0; i < CHUNK; ++i)

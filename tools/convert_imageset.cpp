@@ -111,7 +111,10 @@ int main(int argc, char** argv) {
       status = ReadImageToDatum(root_folder + lines[line_id].first,
           lines[line_id].second, resize_height, resize_width, is_color, &datum);
     }
-    if (status == false) continue;
+    if (status == false) {
+      LOG(ERROR) << "Missing image " << lines[line_id].first;
+      continue;
+    }
     if (check_size) {
       if (!data_size_initialized) {
         data_size = datum.channels() * datum.height() * datum.width();

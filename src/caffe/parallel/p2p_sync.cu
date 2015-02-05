@@ -6,16 +6,16 @@ namespace caffe {
 
 template<typename Dtype>
 __global__
-void p2p_sync_send(Dtype* gpu, Dtype* last, Dtype* chunk, size_t off) {
+void p2p_sync_send(Dtype* grds, size_t off, Dtype* chunk) {
   int i = blockDim.x * blockIdx.x + threadIdx.x;
-  Dtype d = gpu[off + i] - last[off + i];
-  gpu[off + i] = last[off + i] = chunk[i] + d;
-  chunk[i] = d;
+  Dtype g = grds[off + i];
+  grds[off + i] = 0;
+  chunk[i] = g;
 }
 
 template<typename Dtype>
 __global__
-void p2p_sync_recv(Dtype* gpu, Dtype* last, Dtype* chunk, size_t off) {
+void p2p_sync_recv(Dtype* chunk, Dtype* data, Dtype* hist, size_t off) {
   int i = blockDim.x * blockIdx.x + threadIdx.x;
   Dtype d = gpu[off + i] - last[off + i];
   gpu[off + i] = last[off + i] = chunk[i] + d;
@@ -23,10 +23,10 @@ void p2p_sync_recv(Dtype* gpu, Dtype* last, Dtype* chunk, size_t off) {
 }
 
 template<typename Dtype>
-void p2p_sync_send(Dtype* gpu, Dtype* last, Dtype* chunk, size_t off, cudaStream_t& stream) {
-  int threadsPerBlock = 256; // TODO bench
-  int blocksPerGrid = GPUSync<Dtype>::CHUNK / threadsPerBlock;
-  GPUSyncKernel<<<blocksPerGrid, threadsPerBlock, 0, stream>>>(gpu, last, chunk, off);
+void p2p_sync_send(Dtype* grds, size_t off, Dtype* chunk, cudaStream_t& stream) {
+  int threadsPerBlock = 32; // TODO bench
+  int blocksPerGrid = P2PSync<Dtype>::CHUNK / threadsPerBlock;
+  p2p_sync_send<<<blocksPerGrid, threadsPerBlock, 0, stream>>>(grds, off, chunk);
   CUDA_POST_KERNEL_CHECK;
 }
 
@@ -34,7 +34,7 @@ template<typename Dtype>
 void p2p_sync_recv(Dtype* gpu, Dtype* last, Dtype* chunk, size_t off, cudaStream_t& stream) {
   int threadsPerBlock = 256; // TODO bench
   int blocksPerGrid = GPUSync<Dtype>::CHUNK / threadsPerBlock;
-  GPUSyncKernel<<<blocksPerGrid, threadsPerBlock, 0, stream>>>(gpu, last, chunk, off);
+  p2p_sync_recv<<<blocksPerGrid, threadsPerBlock, 0, stream>>>(gpu, last, chunk, off);
   CUDA_POST_KERNEL_CHECK;
 }
 

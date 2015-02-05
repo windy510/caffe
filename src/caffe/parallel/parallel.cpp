@@ -97,7 +97,7 @@ static void apply_buffers(const vector<shared_ptr<Blob<Dtype> > >& blobs,
 }
 
 template<typename Dtype>
-Params<Dtype>::Params(SGDSolver<Dtype>* solver, const string& file_map_dir)
+Params<Dtype>::Params(const SGDSolver<Dtype>* solver, const string& file_map_dir)
     : len_used_(len<Dtype>(solver->net()->params())),
       len_buff_(align(len_used_)) {
 
@@ -120,6 +120,9 @@ Params<Dtype>::Params(SGDSolver<Dtype>* solver, const string& file_map_dir)
   vector<shared_ptr<Blob<Dtype> > >& sol = solver->history();
   apply_buffers(sol, hist_, len_used_, hist_exists ? Op::check : Op::copy);
 
+  CaffeMallocHost((void**) &sink_, len_buff_ * sizeof(Dtype));
+  memset(sink_, 0, len_buff_ * sizeof(Dtype));
+
   iterations_ = 0;
 }
 
@@ -136,6 +139,9 @@ void Params<Dtype>::configure(Solver<Dtype>* solver) const {
 
   vector<shared_ptr<Blob<Dtype> > >& sol = solver->history();
   apply_buffers(sol, hist_, len_used_, Op::replace_cpu);
+
+  solver->net().get()->gradient_sink(sink_);
+  solver->net().get()->gradient_sink_data_start(data_);
 
   solver->iter_total(&iterations_);
 }
@@ -165,8 +171,10 @@ GPUParams<Dtype>::GPUParams(const Params<Dtype>& params, int device)
   const size_t size = params.len_buff() * sizeof(Dtype);
   CUDA_CHECK(cudaMalloc((void** ) &data_, size));
   CUDA_CHECK(cudaMalloc((void** ) &hist_, size));
+  CUDA_CHECK(cudaMalloc((void** ) &sink_, size));
   CUDA_CHECK(cudaMemcpy(data_, params.data(), size, cudaMemcpyHostToDevice));
   CUDA_CHECK(cudaMemcpy(hist_, params.hist(), size, cudaMemcpyHostToDevice));
+  CUDA_CHECK(cudaMemcpy(sink_, params.sink(), size, cudaMemcpyHostToDevice));
   CUDA_CHECK(cudaSetDevice(initial_device));
 }
 

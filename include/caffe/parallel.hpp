@@ -93,7 +93,7 @@ class Params {
  public:
   // Allocate buffers compatible with the given solver, optionally mapped to
   // file (e.g. in /dev/shm) for multi-process configurations or debugging.
-  Params(SGDSolver<Dtype>* solver, const string& file_map_dir = "");
+  Params(const SGDSolver<Dtype>* solver, const string& file_map_dir = "");
   virtual ~Params();
 
   inline size_t len_used() const {
@@ -107,6 +107,9 @@ class Params {
   }
   inline Dtype* hist() const {
     return hist_;
+  }
+  inline Dtype* sink() const {
+    return sink_;
   }
   inline int iterations() {
     return iterations_;
@@ -124,8 +127,9 @@ class Params {
  protected:
   const size_t len_used_;       // Actually used
   const size_t len_buff_;       // Allocated aligned to potential chunks
-  Dtype* data_;
-  Dtype* hist_;
+  Dtype* data_;                 // Network parameters
+  Dtype* hist_;                 // Solver momentum
+  Dtype* sink_;                 // Gradient accumulator
   mutable int iterations_;      // Total iterations across solvers
 
   template<typename U>
@@ -162,6 +166,7 @@ class GPUParams {
   const int device_;
   Dtype* data_;
   Dtype* hist_;
+  Dtype* sink_;
 
 DISABLE_COPY_AND_ASSIGN(GPUParams);
 };
