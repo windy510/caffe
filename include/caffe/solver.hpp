@@ -29,12 +29,12 @@ class Solver {
   void Step(int iters);
   virtual ~Solver() {}
   inline const SolverParameter& param() const { return param_; }
-  inline shared_ptr<Net<Dtype> > net() { return net_; }
+  inline shared_ptr<Net<Dtype> > net() const { return net_; }
   inline const vector<shared_ptr<Net<Dtype> > >& test_nets() {
     return test_nets_;
   }
-  inline int iter() { return iter_; }
-  inline int *iter_total() { return iter_total_; }
+  inline int iter() const  { return iter_; }
+  inline int *iter_total() const  { return iter_total_; }
   inline void iter_total(int *value) { iter_total_ = value; }
 
  protected:
@@ -81,7 +81,7 @@ class SGDSolver : public Solver<Dtype> {
   explicit SGDSolver(const string& param_file)
       : Solver<Dtype>(param_file) { PreSolve(); }
 
-  const vector<shared_ptr<Blob<Dtype> > >& history() { return history_; }
+  const vector<shared_ptr<Blob<Dtype> > >& history() const { return history_; }
 
  protected:
   void PreSolve();

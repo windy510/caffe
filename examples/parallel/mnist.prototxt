@@ -6,7 +6,6 @@ layers {
   top: "label"
   data_param {
     source: "/scratch/mnist/mnist-train-8m"
-    source: "/data/shared/mnist/mnist-train-8m"
     backend: LMDB
     batch_size: 64
     rand_skip: 10000

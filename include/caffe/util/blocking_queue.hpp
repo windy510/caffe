@@ -28,13 +28,13 @@ class blocking_queue {
     return queue_.empty();
   }
 
-  bool try_pop(T* t) {
+  bool try_pop(T& t) {
     boost::mutex::scoped_lock lock(mutex_);
 
     if (queue_.empty())
       return false;
 
-    *t = queue_.front();
+    t = queue_.front();
     queue_.pop();
     return true;
   }
@@ -57,6 +57,17 @@ class blocking_queue {
     queue_.pop();
     pops_++;
     return t;
+  }
+
+  bool try_peek(T& t) {
+    boost::mutex::scoped_lock lock(mutex_);
+
+    if(queue_.empty()) {
+      return false;
+    }
+
+    t = queue_.front();
+    return true;
   }
 
   // Return element without removing it

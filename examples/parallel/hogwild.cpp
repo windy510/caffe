@@ -21,7 +21,7 @@
 using namespace std;
 using namespace caffe;
 
-// Trains a net in parallel on multiple CPU cores. C.f. CPUSync in parallel.h.
+// Trains a net in parallel on multiple CPU cores.
 //
 // Your BLAS library needs to let the application manage its threads, e.g.
 // for OpenBLAS, compile with no threading (USE_THREAD = 0 in Makefile.rule).
@@ -30,7 +30,7 @@ using namespace caffe;
 //
 // Example launch on 4 cores:
 // make -j
-// export LD_LIBRARY_PATH=<single thread BLAS>:/usr/local/lib:/usr/local/cuda/lib64
+// export LD_LIBRARY_PATH=<custom BLAS>:/usr/local/lib:/usr/local/cuda/lib64
 // export GLOG_logtostderr=1
 // build/examples/parallel/hogwild.bin examples/parallel/mnist_solver.prototxt 4
 
@@ -43,33 +43,33 @@ int main(int argc, char** argv) {
     return 1;
   }
 
-  SolverParameter solver_param;
-  ReadProtoFromTextFile(argv[1], &solver_param);
+  SolverParameter proto;
+  ReadProtoFromTextFile(argv[1], &proto);
 
   int cores = argc == 3 ? atoi(argv[2]) : sysconf(_SC_NPROCESSORS_ONLN);
 
   // Override in code so that proto file can be shared with other examples
-  solver_param.set_solver_mode(SolverParameter::CPU);
+  proto.set_solver_mode(SolverParameter::CPU);
 
-  // Main solver
-  SGDSolver<float> main(solver_param);
+  // First solver does testing, display etc.
+  SGDSolver<float> first(proto);
 
   // Shared network weights
-  Params<float> params(main.net()->params());
+  CPUParams<float> params(first);
 
   // Create contexts
   vector<SolverContext*> solvers(cores);
-  solvers[0] = new CPUContext(params, solver_param, &main);
+  solvers[0] = new SolverContext(&params, proto, &first);
   for (int i = 1; i < cores; ++i) {
-    solvers[i] = new CPUContext(params, solver_param);
+    solvers[i] = new SolverContext(&params, proto);
     solvers[i]->start();
   }
 
   // Start monitor
-  Monitor monitor(params, solvers);
+  Monitor monitor(solvers, .9);
   monitor.start();
 
-  // Run main on current thread
+  // Run first on current thread
   solvers[0]->run();
 
   monitor.stop();
