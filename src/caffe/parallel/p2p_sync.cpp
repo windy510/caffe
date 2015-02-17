@@ -194,6 +194,7 @@ template<typename Dtype>
 void P2PSync<Dtype>::GPU::GPU::run() {
   CUDA_CHECK(cudaSetDevice(params_[index_]->device()));
   const int device = params_[index_]->device();
+  if(device){} // TODO just for debug
 
   // Create async stream
   cudaStream_t stream;
@@ -221,9 +222,9 @@ void P2PSync<Dtype>::GPU::GPU::run() {
       // Compute data to send when a free buffer is available
       if (channel.free_.try_peek(message)
           && cudaEventQuery(message->target_done_) == cudaSuccess) {
-        channel.free_.pop();
 
-//        if (!params_[index_]->device()) {
+        if (params_[index_]->device() >= 0) {
+          channel.free_.pop();
           size_t offset = chunk * CHUNK;
           p2p_sync_send<Dtype>(data, copy, offset, message->source_, stream);
           message->chunk_ = chunk;
@@ -233,7 +234,7 @@ void P2PSync<Dtype>::GPU::GPU::run() {
             chunk = 0;
             cycles_++;
           }
-//        }
+        }
       }
       // Send message to target
       if (!channel.pending_.empty()) {

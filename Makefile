@@ -260,13 +260,9 @@ endif
 
 # Debugging
 ifeq ($(DEBUG), 1)
-<<<<<<< Upstream, based on data_queues
 	COMMON_FLAGS += -DDEBUG -g -O0
 	# Compile issue in DEBUG on MAC (https://svn.boost.org/trac/boost/ticket/9392)
 	COMMON_FLAGS += -DBOOST_NOINLINE='__attribute__ ((noinline))'
-=======
-	COMMON_FLAGS += -DDEBUG -g -O0 -DBOOST_NOINLINE='__attribute__ ((noinline))'
->>>>>>> f9618aa Parallel GPU training p2p
 	NVCCFLAGS += -G
 else
 	COMMON_FLAGS += -DNDEBUG -O2

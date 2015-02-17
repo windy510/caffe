@@ -236,7 +236,7 @@ void GPUParams<Dtype>::FileMapper::run() {
   const size_t len = params_.len_buff() * sizeof(Dtype);
 
   while (!must_stop()) {
-    sleep(1);  // Once per second seems OK for debug and visualization
+    usleep(100000);
     const cudaMemcpyKind d2h = cudaMemcpyDeviceToHost;
     CUDA_CHECK(cudaMemcpyAsync(data, params_.data(), len, d2h, stream));
     CUDA_CHECK(cudaMemcpyAsync(hist, params_.hist(), len, d2h, stream));

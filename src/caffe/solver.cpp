@@ -214,7 +214,7 @@ void Solver<Dtype>::Step(int iters) {
       }
     }
     ComputeUpdateValue();
-//    if(param_.device_id() == 2)
+    if(param_.device_id() > 0)
       net_->Update();
 
     // Save a snapshot if needed.

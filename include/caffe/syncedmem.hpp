@@ -55,10 +55,6 @@ class SyncedMemory {
   void async_gpu_push(const cudaStream_t& stream);
 #endif
 
-#ifndef CPU_ONLY
-  void async_gpu_push(const cudaStream_t& stream);
-#endif
-
  private:
   void to_cpu();
   void to_gpu();

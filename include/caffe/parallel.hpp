@@ -35,7 +35,7 @@ class Threaded : public InternalThread {
     this->StartInternalThread();
   }
   virtual void stop() {
-    this->WaitForInternalThreadToExit();
+    this->StopInternalThread();
   }
 
   virtual void run() = 0;

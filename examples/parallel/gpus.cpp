@@ -101,6 +101,7 @@ int main(int argc, char** argv) {
   // Create first solver
   proto.set_device_id(gpus[0]);
   SGDSolver<float> first(proto);
+  first.Restore("examples/parallel/lenet_iter_1000.solverstate");
 
   // Device to params map
   map<int, GPUParams<float>*> params;
@@ -134,7 +135,7 @@ int main(int argc, char** argv) {
         params_groups[group].push_back(params[device]);
       }
       syncs[group] = new P2PSync<float>(params_groups[group]);
-//      syncs[group]->start();
+      syncs[group]->start();
     }
   }
 
