@@ -17,22 +17,29 @@ namespace caffe {
 template <typename Dtype>
 class Solver {
  public:
-  explicit Solver(const SolverParameter& param);
+  explicit Solver(const SolverParameter& param, bool skip_test_nets);
   explicit Solver(const string& param_file);
-  void Init(const SolverParameter& param);
+  void Init(const SolverParameter& param, bool skip_test_nets);
   void InitTrainNet();
   void InitTestNets();
+  // The Restore function implements how one should restore the solver to a
+  // previously snapshotted state. You should implement the RestoreSolverState()
+  // function that restores the state from a SolverState protocol buffer.
+  void Restore(const char* resume_file);
   // The main entry of the solver function. In default, iter will be zero. Pass
   // in a non-zero iter number to resume training for a pre-trained net.
   virtual void Solve(const char* resume_file = NULL);
   inline void Solve(const string resume_file) { Solve(resume_file.c_str()); }
   void Step(int iters);
   virtual ~Solver() {}
-  inline shared_ptr<Net<Dtype> > net() { return net_; }
+  inline const SolverParameter& param() const { return param_; }
+  inline shared_ptr<Net<Dtype> > net() const { return net_; }
   inline const vector<shared_ptr<Net<Dtype> > >& test_nets() {
     return test_nets_;
   }
-  int iter() { return iter_; }
+  inline int iter() const  { return iter_; }
+  inline int *iter_total() const  { return iter_total_; }
+  inline void iter_total(int *value) { iter_total_ = value; }
 
  protected:
   // Get the update value for the current iteration.
@@ -46,15 +53,14 @@ class Solver {
   void TestAll();
   void Test(const int test_net_id = 0);
   virtual void SnapshotSolverState(SolverState* state) = 0;
-  // The Restore function implements how one should restore the solver to a
-  // previously snapshotted state. You should implement the RestoreSolverState()
-  // function that restores the state from a SolverState protocol buffer.
-  void Restore(const char* resume_file);
   virtual void RestoreSolverState(const SolverState& state) = 0;
   void DisplayOutputBlobs(const int net_id);
 
   SolverParameter param_;
   int iter_;
+  // Points to iter_ by default, but can be overriden, e.g. to a global
+  // counter if multiple solvers contribute iterations to the same model.
+  int *iter_total_;
   int current_step_;
   shared_ptr<Net<Dtype> > net_;
   vector<shared_ptr<Net<Dtype> > > test_nets_;
@@ -70,12 +76,12 @@ class Solver {
 template <typename Dtype>
 class SGDSolver : public Solver<Dtype> {
  public:
-  explicit SGDSolver(const SolverParameter& param)
-      : Solver<Dtype>(param) { PreSolve(); }
+  explicit SGDSolver(const SolverParameter& param, bool skip_test_nets = false)
+      : Solver<Dtype>(param, skip_test_nets) { PreSolve(); }
   explicit SGDSolver(const string& param_file)
       : Solver<Dtype>(param_file) { PreSolve(); }
 
-  const vector<shared_ptr<Blob<Dtype> > >& history() { return history_; }
+  const vector<shared_ptr<Blob<Dtype> > >& history() const { return history_; }
 
  protected:
   void PreSolve();

@@ -18,9 +18,11 @@ class blocking_queue {
 
   bool empty() const;
 
-  bool try_pop(T* t);
+  bool try_pop(T& t);
 
   T pop(const string& log_on_wait = "");
+
+  bool try_peek(T& t);
 
   // Return element without removing it
   T peek();

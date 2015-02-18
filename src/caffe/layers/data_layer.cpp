@@ -70,10 +70,10 @@ DataLoader::Body::Body(const DataParameter& param, int index) {
 DataLoader::Body::~Body() {
   CHECK(StopInternalThread()) << "DataLoader thread stop failed";
   Datum* datum;
-  while (free_.try_pop(&datum)) {
+  while (free_.try_pop(datum)) {
     delete datum;
   }
-  while (full_.try_pop(&datum)) {
+  while (full_.try_pop(datum)) {
     delete datum;
   }
 }

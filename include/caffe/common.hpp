@@ -98,10 +98,10 @@ class Caffe {
  public:
   ~Caffe();
   inline static Caffe& Get() {
-    if (!singleton_.get()) {
-      singleton_.reset(new Caffe());
+    if (!thread_instance_.get()) {
+      thread_instance_.reset(new Caffe());
     }
-    return *singleton_;
+    return *(thread_instance_.get());
   }
   enum Brew { CPU, GPU };
 
@@ -152,6 +152,7 @@ class Caffe {
 
  protected:
 #ifndef CPU_ONLY
+  cudaStream_t cuda_stream_;
   cublasHandle_t cublas_handle_;
   curandGenerator_t curand_generator_;
 #endif
@@ -159,7 +160,9 @@ class Caffe {
   unsigned int random_generator_seed_;
 
   Brew mode_;
-  static shared_ptr<Caffe> singleton_;
+
+  // Make sure each thread can have different values.
+  static thread_specific_ptr<Caffe> thread_instance_;
 
  private:
   // The private constructor to avoid duplicate instantiation.

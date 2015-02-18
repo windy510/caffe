@@ -70,6 +70,18 @@ T blocking_queue<T>::pop(const string& log_on_wait) {
 }
 
 template<typename T>
+bool blocking_queue<T>::try_peek(T& t) {
+  boost::mutex::scoped_lock lock(sync_.get()->mutex_);
+
+  if (queue_.empty()) {
+    return false;
+  }
+
+  t = queue_.front();
+  return true;
+}
+
+template<typename T>
 T blocking_queue<T>::peek() {
   boost::mutex::scoped_lock lock(sync_.get()->mutex_);
 
