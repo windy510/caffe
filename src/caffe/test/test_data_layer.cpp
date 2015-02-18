@@ -508,7 +508,6 @@ TYPED_TEST(DataLayerTest, TestReadCropTestLMDB) {
 }
 
 TYPED_TEST(DataLayerTest, TestTwoProbabilities) {
-  Caffe::set_phase(Caffe::TEST);
   const bool unique_pixels = true;  // all images the same; pixels different
   this->Fill(unique_pixels, DataParameter_DB_LMDB, 0);
   this->Fill(unique_pixels, DataParameter_DB_LEVELDB, 1);

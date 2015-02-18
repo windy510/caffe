@@ -231,44 +231,22 @@ class P2PSync {
   static const int CHUNK = 262144;
 
  protected:
-  vector<shared_ptr<GPU> > gpus_;
-
-  // Transfer between two GPUs
-  class Message {
+  // Emulates P2P multicast by sending from one GPU to others in group
+  class Multicast {
    public:
-    Message(int source_device, int target_device);
-    ~Message();
+    Multicast(int source_device, vector<int> target_devices);
+    ~Multicast();
+
+    bool target_events_done() const;
 
     const static int LENGTH = CHUNK * sizeof(Dtype);
     Dtype* source_;
-    Dtype* target_;
-    cudaEvent_t source_done_;
-    cudaEvent_t target_done_;
+    vector<Dtype*> targets_;
+    cudaEvent_t source_event_;
+    vector<cudaEvent_t> target_events_;
     uint32_t chunk_;
 
-  DISABLE_COPY_AND_ASSIGN(Message);
-  };
-
-  // Queue pair to send messages, and return them when done
-  // for buffer reuse
-  class Channel {
-   public:
-    Channel(int source_device, int target_device);
-    ~Channel();
-
-    const static int LENGTH = 8;
-    const int source_device_, target_device_;
-
-    // TODO switch to spsc_queue (Boost 1.53 not packaged on Ubuntu 12.04)
-    blocking_queue<Message*> free_;
-    blocking_queue<Message*> full_;
-    // Messages waiting on a kernel async execution
-    deque<Message*> pending_;
-
-    // Perf counters
-    Meter sent_, recv_;
-
-  DISABLE_COPY_AND_ASSIGN(Channel);
+  DISABLE_COPY_AND_ASSIGN(Multicast);
   };
 
  public:
@@ -301,8 +279,10 @@ class P2PSync {
     const vector<GPUParams<Dtype>*> params_;
     const int index_;
     const uint32_t chunks_;
-    vector<Channel*> send_channels_;
-    vector<Channel*> recv_channels_;
+
+    // TODO switch to spsc_queue (Boost 1.53 not packaged on Ubuntu 12.04)
+    const static int RECV_QUEUE_LENGTH = 8;
+    blocking_queue<Multicast*> recv_queue_;
 
     // Perf counters
     Meter sent_, recv_, cycles_;
@@ -312,6 +292,9 @@ class P2PSync {
 
   DISABLE_COPY_AND_ASSIGN(GPU);
   };
+
+ protected:
+  vector<shared_ptr<GPU> > gpus_;
 
 DISABLE_COPY_AND_ASSIGN(P2PSync);
 };

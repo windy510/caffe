@@ -92,26 +92,46 @@ void P2PSync<Dtype>::stop() {
 //
 
 template<typename Dtype>
-P2PSync<Dtype>::Message::Message(int source_device, int target_device)
+P2PSync<Dtype>::Multicast::Multicast(int source_device,
+                                     vector<int> target_devices)
     : chunk_() {
   int initial_device;
   CUDA_CHECK(cudaGetDevice(&initial_device));
+  const unsigned int flags = cudaEventDisableTiming;
+
   CUDA_CHECK(cudaSetDevice(source_device));
   CUDA_CHECK(cudaMalloc((void** ) &source_, CHUNK * sizeof(Dtype)));
-  CUDA_CHECK(cudaEventCreateWithFlags(&source_done_, cudaEventDisableTiming));
-  CUDA_CHECK(cudaSetDevice(target_device));
-  CUDA_CHECK(cudaMalloc((void** ) &target_, CHUNK * sizeof(Dtype)));
-  CUDA_CHECK(cudaEventCreateWithFlags(&target_done_, cudaEventDisableTiming));
+  CUDA_CHECK(cudaEventCreateWithFlags(&source_event_, flags));
+
+  for (int i = 0; i < target_devices.size(); ++i) {
+    CUDA_CHECK(cudaSetDevice(target_devices[i]));
+    CUDA_CHECK(cudaMalloc((void** ) &targets_[i], CHUNK * sizeof(Dtype)));
+    CUDA_CHECK(cudaEventCreateWithFlags(&target_events_[i], flags));
+  }
   CUDA_CHECK(cudaSetDevice(initial_device));
 }
 
 template<typename Dtype>
-P2PSync<Dtype>::Message::~Message() {
-  CUDA_CHECK(cudaFree((void** ) &target_));
+P2PSync<Dtype>::Multicast::~Multicast() {
+  for (int i = 0; i < targets_.size(); ++i) {
+    CUDA_CHECK(cudaEventDestroy(target_events_[i]));
+    CUDA_CHECK(cudaFree((void** ) &targets_[i]));
+  }
+  CUDA_CHECK(cudaEventDestroy(source_event_));
   CUDA_CHECK(cudaFree((void** ) &source_));
-  CUDA_CHECK(cudaEventDestroy(source_done_));
-  CUDA_CHECK(cudaEventDestroy(target_done_));
 }
+
+template<typename Dtype>
+bool P2PSync<Dtype>::Multicast::target_events_done() const {
+  for (int i = 0; i < target_events_.size(); ++i) {
+    if (cudaEventQuery(target_events_[i]) != cudaSuccess) {
+      return false;
+    }
+  }
+  return true;
+}
+
+target_events_done
 
 //
 
@@ -120,12 +140,14 @@ P2PSync<Dtype>::Channel::Channel(int source_device, int target_device)
     : source_device_(source_device),
       target_device_(target_device),
       sent_(
-          "sent " + lexical_cast<string>(source_device) + "->"
-              + lexical_cast<string>(target_device),
+          "sent " + lexical_cast < string
+              > (source_device) + "->" + lexical_cast < string
+              > (target_device),
           CHUNK * sizeof(Dtype)),
       recv_(
-          "recv " + lexical_cast<string>(source_device) + "<-"
-              + lexical_cast<string>(target_device),
+          "recv " + lexical_cast < string
+              > (source_device) + "<-" + lexical_cast < string
+              > (target_device),
           CHUNK * sizeof(Dtype)) {
   for (int i = 0; i < LENGTH; ++i) {
     free_.push(new Message(source_device, target_device));
@@ -194,7 +216,8 @@ template<typename Dtype>
 void P2PSync<Dtype>::GPU::GPU::run() {
   CUDA_CHECK(cudaSetDevice(params_[index_]->device()));
   const int device = params_[index_]->device();
-  if(device){} // TODO just for debug
+  if (device) {
+  }  // TODO just for debug
 
   // Create async stream
   cudaStream_t stream;
@@ -210,42 +233,61 @@ void P2PSync<Dtype>::GPU::GPU::run() {
   cudaMemcpyKind dev2dev = cudaMemcpyDeviceToDevice;
   CUDA_CHECK(cudaMemcpy(copy, data, size, dev2dev));
 
+  deque<Multicast*> free, sending, sent;
   uint32_t chunk = 0;
+
   // Dtype* hist = this->params_.hist();
   // sleep(10000);
 
   while (!must_stop()) {
-    for (int i = 0; i < send_channels_.size(); ++i) {
-      Channel& channel = *(send_channels_[i]);
-      Message* message;
+    Multicast* m;
 
-      // Compute data to send when a free buffer is available
-      if (channel.free_.try_peek(message)
-          && cudaEventQuery(message->target_done_) == cudaSuccess) {
-
+    if (!free.empty()) {
+      m = free.front();
+      if (m->target_events_done()) {
         if (params_[index_]->device() >= 0) {
-          channel.free_.pop();
+          free.pop();
           size_t offset = chunk * CHUNK;
-          p2p_sync_send<Dtype>(data, copy, offset, message->source_, stream);
-          message->chunk_ = chunk;
-          CUDA_CHECK(cudaEventRecord(message->source_done_, stream));
-          channel.pending_.push_back(message);
+          p2p_sync_send<Dtype>(data, copy, offset, m->source_, stream);
+          m->chunk_ = chunk;
+          CUDA_CHECK(cudaEventRecord(m->source_event_, stream));
+          sending.push_back(m);
           if (++chunk == chunks_) {
             chunk = 0;
             cycles_++;
           }
         }
       }
-      // Send message to target
-      if (!channel.pending_.empty()) {
-        message = channel.pending_.front();
-        if (cudaEventQuery(message->source_done_) == cudaSuccess) {
-          channel.pending_.pop_front();
-          CUDA_CHECK(cudaMemcpyAsync(message->target_, message->source_,  //
-                                     CHUNK * sizeof(Dtype), dev2dev, stream));
-          CUDA_CHECK(cudaEventRecord(message->source_done_, stream));
-          channel.full_.push(message);
-          channel.sent_++;
+    }
+
+    if (!sending.empty()) {
+      m = free.front();
+      if(cudaEventQuery(message->target_done_) == cudaSuccess) {
+
+      if (m->target_events_done()) {
+      }
+    }
+
+    if (all_ready_to_send) {
+      for (int i = 0; i < send_channels_.size(); ++i) {
+        Channel& channel = *(send_channels_[i]);
+        Message* message;
+
+        // Compute data to send when a free buffer is available
+        if (channel.free_.try_peek(message)
+            && cudaEventQuery(message->target_done_) == cudaSuccess) {
+        }
+        // Send message to target
+        if (!channel.pending_.empty()) {
+          message = channel.pending_.front();
+          if (cudaEventQuery(message->source_done_) == cudaSuccess) {
+            channel.pending_.pop_front();
+            CUDA_CHECK(cudaMemcpyAsync(message->target_, message->source_,  //
+                                       CHUNK * sizeof(Dtype), dev2dev, stream));
+            CUDA_CHECK(cudaEventRecord(message->source_done_, stream));
+            channel.full_.push(message);
+            channel.sent_++;
+          }
         }
       }
     }

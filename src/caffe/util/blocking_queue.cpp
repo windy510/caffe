@@ -1,6 +1,8 @@
 #include <boost/thread.hpp>
+#include <string>
 
 #include "caffe/data_layers.hpp"
+#include "caffe/parallel.hpp"
 #include "caffe/util/blocking_queue.hpp"
 
 namespace caffe {
@@ -37,13 +39,13 @@ bool blocking_queue<T>::empty() const {
   return queue_.empty();
 }
 template<typename T>
-bool blocking_queue<T>::try_pop(T* t) {
+bool blocking_queue<T>::try_pop(T& t) {
   boost::mutex::scoped_lock lock(sync_.get()->mutex_);
 
   if (queue_.empty())
     return false;
 
-  *t = queue_.front();
+  t = queue_.front();
   queue_.pop();
   return true;
 }
@@ -91,8 +93,10 @@ T blocking_queue<T>::peek() {
   return queue_.front();
 }
 
-template class blocking_queue<Batch<float>*> ;
-template class blocking_queue<Batch<double>*> ;
-template class blocking_queue<Datum*> ;
+template class blocking_queue<Batch<float>*>;
+template class blocking_queue<Batch<double>*>;
+template class blocking_queue<Datum*>;
+template class blocking_queue<P2PSync<float>::Message*>;
+template class blocking_queue<P2PSync<double>::Message*>;
 
 }  // namespace caffe

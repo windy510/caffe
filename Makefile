@@ -25,6 +25,8 @@ LIB_BUILD_DIR := $(BUILD_DIR)/lib
 STATIC_NAME := $(LIB_BUILD_DIR)/lib$(PROJECT).a
 DYNAMIC_NAME := $(LIB_BUILD_DIR)/lib$(PROJECT).so
 
+CUDA_VERSION := $(shell $(CUDA_DIR)/bin/nvcc -V | grep -oP 'release \d' | grep -oP '\d')
+
 ##############################
 # Get all source files
 ##############################
@@ -232,7 +234,6 @@ endif
 # libstdc++ for NVCC compatibility on OS X >= 10.9 with CUDA < 7.0
 ifeq ($(OSX), 1)
 	CXX := /usr/bin/clang++
-	CUDA_VERSION := $(shell $(CUDA_DIR)/bin/nvcc -V | grep -o 'release \d' | grep -o '\d')
 	ifeq ($(shell echo $(CUDA_VERSION) \< 7.0 | bc), 1)
 		CXXFLAGS += -stdlib=libstdc++
 		LINKFLAGS += -stdlib=libstdc++
@@ -329,6 +330,12 @@ else
 		endif
 	endif
 endif
+
+# CUDA 7 features
+ifeq ($(shell echo $(CUDA_VERSION) \< 7.0 | bc), 0)
+	NVCCFLAGS += --default-stream per-thread
+endif
+
 INCLUDE_DIRS += $(BLAS_INCLUDE)
 LIBRARY_DIRS += $(BLAS_LIB)
 

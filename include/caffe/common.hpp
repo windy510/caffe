@@ -97,12 +97,12 @@ void GlobalInit(int* pargc, char*** pargv);
 class Caffe {
  public:
   ~Caffe();
-  inline static Caffe& Get() {
-    if (!thread_instance_.get()) {
-      thread_instance_.reset(new Caffe());
-    }
-    return *(thread_instance_.get());
-  }
+
+  // Moved to common.cpp instead of including boost/thread.hpp
+  // to avoid a boost/NVCC issues (#1009, #1010) on OSX. Also fails on
+  // Linux CUDA 7.0.18.
+  static Caffe& Get();
+
   enum Brew { CPU, GPU };
 
   // This random number generator facade hides boost and CUDA rng
@@ -160,9 +160,6 @@ class Caffe {
   unsigned int random_generator_seed_;
 
   Brew mode_;
-
-  // Make sure each thread can have different values.
-  static thread_specific_ptr<Caffe> thread_instance_;
 
  private:
   // The private constructor to avoid duplicate instantiation.
