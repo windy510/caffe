@@ -101,7 +101,7 @@ int main(int argc, char** argv) {
   // Create first solver
   proto.set_device_id(gpus[0]);
   SGDSolver<float> first(proto);
-  first.Restore("examples/parallel/lenet_iter_1000.solverstate");
+//  first.Restore("examples/parallel/lenet_iter_1000.solverstate");
 
   // Device to params map
   map<int, GPUParams<float>*> params;

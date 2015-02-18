@@ -226,6 +226,7 @@ void P2PSync<Dtype>::GPU::GPU::run() {
         if (params_[index_]->device() >= 0) {
           channel.free_.pop();
           size_t offset = chunk * CHUNK;
+          // TODO put outside of loop for 2+ GPUs per group
           p2p_sync_send<Dtype>(data, copy, offset, message->source_, stream);
           message->chunk_ = chunk;
           CUDA_CHECK(cudaEventRecord(message->source_done_, stream));

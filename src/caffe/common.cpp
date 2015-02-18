@@ -92,14 +92,10 @@ void* Caffe::RNG::generator() {
 Caffe::Caffe()
     : cublas_handle_(NULL), curand_generator_(NULL), random_generator_(),
     mode_(Caffe::CPU), phase_(Caffe::TRAIN) {
-  CUDA_CHECK(cudaStreamCreateWithFlags(&cuda_stream_, cudaStreamNonBlocking));
   // Try to create a cublas handler, and report an error if failed (but we will
   // keep the program running as one might just want to run CPU code).
   if (cublasCreate(&cublas_handle_) != CUBLAS_STATUS_SUCCESS) {
     LOG(ERROR) << "Cannot create Cublas handle. Cublas won't be available.";
-  } else {
-    CHECK(cublasSetStream(cublas_handle_, cuda_stream_)
-          == CUBLAS_STATUS_SUCCESS) << "Cannot set cublas stream.";
   }
   // Try to create a curand handler.
   if (curandCreateGenerator(&curand_generator_, CURAND_RNG_PSEUDO_DEFAULT)
@@ -107,9 +103,6 @@ Caffe::Caffe()
       curandSetPseudoRandomGeneratorSeed(curand_generator_, cluster_seedgen())
       != CURAND_STATUS_SUCCESS) {
     LOG(ERROR) << "Cannot create Curand generator. Curand won't be available.";
-  } else {
-    CHECK(curandSetStream(curand_generator_, cuda_stream_)
-          == CURAND_STATUS_SUCCESS) << "Cannot set curand stream.";
   }
 }
 
@@ -118,7 +111,6 @@ Caffe::~Caffe() {
   if (curand_generator_) {
     CURAND_CHECK(curandDestroyGenerator(curand_generator_));
   }
-  CUDA_CHECK(cudaStreamDestroy(cuda_stream_));
 }
 
 unsigned int Caffe::get_random_seed() {

@@ -160,7 +160,6 @@ class Caffe {
 
  protected:
 #ifndef CPU_ONLY
-  cudaStream_t cuda_stream_;
   cublasHandle_t cublas_handle_;
   curandGenerator_t curand_generator_;
 #endif
