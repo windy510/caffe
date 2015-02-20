@@ -24,6 +24,9 @@ class InternalThread {
   /** Returns true if the thread was successfully started. **/
   bool StartInternalThread();
 
+  /** Returns immediately. */
+  void RequestInternalThreadStop();
+
   /** Will not return until the internal thread has exited. */
   bool StopInternalThread();
 

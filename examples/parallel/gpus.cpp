@@ -55,10 +55,6 @@ class GPUMonitor : public Monitor {
         P2PSync<float>::GPU* gpu = syncs_[sync]->gpus()[g].get();
         s << "  gpu " << gpu->params()[gpu->index()]->device() << "\n";
         gpu->sent().show(s, DETAILLED, 2);
-        if (!DETAILLED) {
-          s << ", ";
-        }
-        gpu->recv().show(s, DETAILLED, 2);
       }
     }
   }
@@ -101,7 +97,7 @@ int main(int argc, char** argv) {
   // Create first solver
   proto.set_device_id(gpus[0]);
   SGDSolver<float> first(proto);
-  first.Restore("examples/parallel/lenet_iter_1000.solverstate");
+//  first.Restore("examples/parallel/lenet_iter_1000.solverstate");
 
   // Device to params map
   map<int, GPUParams<float>*> params;
@@ -147,21 +143,24 @@ int main(int argc, char** argv) {
   solvers[0]->run();
 
   monitor.stop();
-  LOG(INFO)<< "Monitor stop\n";
+  LOG(INFO)<< "Monitor stopped\n";
 
   for (int i = 0; syncs[i] && i < syncs.size(); ++i) {
     syncs[i]->stop();
     delete syncs[i];
   }
+  LOG(INFO)<< "Syncs stopped\n";
   for (int i = 1; i < solvers.size(); ++i)
     solvers[i]->stop();
   for (int i = 0; i < solvers.size(); ++i)
     delete solvers[i];
+  LOG(INFO)<< "Solvers stopped\n";
   for (int i = 0; i < gpus.size(); ++i) {
     debug[i]->stop();
     delete debug[i];
     delete params[gpus[i]];
   }
+  LOG(INFO)<< "Debugs stopped\n";
 }
 
 #else

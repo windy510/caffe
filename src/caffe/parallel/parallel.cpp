@@ -1,3 +1,4 @@
+#include <boost/thread.hpp>
 #include <cstdlib>
 #include <string>
 #include <stdio.h>
@@ -235,16 +236,19 @@ void GPUParams<Dtype>::FileMapper::run() {
   CUDA_CHECK(cudaStreamCreateWithFlags(&stream, cudaStreamNonBlocking));
   const size_t len = params_.len_buff() * sizeof(Dtype);
 
-  while (!must_stop()) {
-    usleep(100000);
-    const cudaMemcpyKind d2h = cudaMemcpyDeviceToHost;
-    CUDA_CHECK(cudaMemcpyAsync(data, params_.data(), len, d2h, stream));
-    CUDA_CHECK(cudaMemcpyAsync(hist, params_.hist(), len, d2h, stream));
+  try {
+    while (!must_stop()) {
+      usleep(100000);
+      const cudaMemcpyKind d2h = cudaMemcpyDeviceToHost;
+      CUDA_CHECK(cudaMemcpyAsync(data, params_.data(), len, d2h, stream));
+      CUDA_CHECK(cudaMemcpyAsync(hist, params_.hist(), len, d2h, stream));
+    }
+    throw boost::thread_interrupted();
+  } catch (...) {
+    CUDA_CHECK(cudaStreamDestroy(stream));
+    munmap((void*) data, len);
+    munmap((void*) hist, len);
   }
-
-  CUDA_CHECK(cudaStreamDestroy(stream));
-  munmap((void*) data, len);
-  munmap((void*) hist, len);
 }
 
 INSTANTIATE_CLASS(Params);

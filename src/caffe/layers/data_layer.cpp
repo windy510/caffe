@@ -228,9 +228,9 @@ void DataLayer<Dtype>::load_batch(Batch<Dtype>* batch) {
     loader->free().push(const_cast<Datum*>(&datum));
   }
   batch_timer.Stop();
-  DLOG(INFO) << "Prefetch batch: " << batch_timer.MilliSeconds() << " ms.";
-  DLOG(INFO) << "     Read time: " << read_time / 1000 << " ms.";
-  DLOG(INFO) << "Transform time: " << trans_time / 1000 << " ms.";
+//  DLOG(INFO) << "Prefetch batch: " << batch_timer.MilliSeconds() << " ms.";
+//  DLOG(INFO) << "     Read time: " << read_time / 1000 << " ms.";
+//  DLOG(INFO) << "Transform time: " << trans_time / 1000 << " ms.";
 }
 
 // This function is called on prefetch thread

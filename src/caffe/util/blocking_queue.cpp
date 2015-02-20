@@ -96,7 +96,7 @@ T blocking_queue<T>::peek() {
 template class blocking_queue<Batch<float>*>;
 template class blocking_queue<Batch<double>*>;
 template class blocking_queue<Datum*>;
-template class blocking_queue<P2PSync<float>::Message*>;
-template class blocking_queue<P2PSync<double>::Message*>;
+template class blocking_queue<P2PSync<float>::Multicast*>;
+template class blocking_queue<P2PSync<double>::Multicast*>;
 
 }  // namespace caffe

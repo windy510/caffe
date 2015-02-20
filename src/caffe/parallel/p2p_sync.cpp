@@ -1,12 +1,13 @@
+#include <boost/thread.hpp>
 #include <cstdlib>
-#include <string>
-#include <stdio.h>
-#include <iostream>
 #include <cstring>
-#include <sstream>
 #include <glog/logging.h>
+#include <iostream>
+#include <sstream>
+#include <stdio.h>
+#include <string>
 
-#include <caffe/caffe.hpp>
+#include "caffe/caffe.hpp"
 #include "caffe/filler.hpp"
 #include "caffe/parallel.hpp"
 
@@ -37,7 +38,11 @@ inline bool IsAppBuiltAs64() {
 namespace caffe {
 
 template<typename Dtype>
-P2PSync<Dtype>::P2PSync(const vector<GPUParams<Dtype>*>& params) {
+P2PSync<Dtype>::P2PSync(const vector<GPUParams<Dtype>*>& params)
+    : barrier_(new boost::barrier(params.size())),
+      gpus_(params.size()),
+      sent_("sent", CHUNK * sizeof(Dtype)),
+      cycles_("cycles") {
   for (int i = 1; i < params.size(); ++i) {
     CHECK(params[i]->len_used() == params[0]->len_used());
     CHECK(params[i]->len_buff() == params[0]->len_buff());
@@ -50,28 +55,21 @@ P2PSync<Dtype>::P2PSync(const vector<GPUParams<Dtype>*>& params) {
     CHECK(IsGPUCapableP2P(&prop)) << "GPU " << dev << " does not support P2P";
     CHECK(prop.unifiedAddressing) << "GPU " << dev << " does not support UVA";
   }
-
-  gpus_.resize(params.size());
   for (int i = 0; i < params.size(); ++i) {
-    gpus_[i].reset(new GPU(*this, params, i));
-  }
-
-  // Add each send_channel to corresponding recv channels list
-  for (int source = 0; source < gpus_.size(); ++source) {
-    vector<Channel*>& send = gpus_[source].get()->send_channels_;
-    for (int i = 0; i < send.size(); ++i) {
-      Channel* channel = send[i];
-      for (int target = 0; target < gpus_.size(); ++target) {
-        CHECK(channel->source_device_ == params[source]->device());
-        if (channel->target_device_ == params[target]->device()) {
-          gpus_[target].get()->recv_channels_.push_back(channel);
-          gpus_[target].get()->recv_.add_child(&channel->recv_);
-        }
+    for (int j = 0; j < params.size(); ++j) {
+      if (j != i) {
+        const int device = params[i]->device();
+        const int peer = params[j]->device();
+        int access;
+        CUDA_CHECK(cudaDeviceCanAccessPeer(&access, device, peer));
+        CHECK(access) << "GPU " << device << " cannot access GPU " << peer;
       }
     }
   }
-  for (int i = 0; i < gpus_.size(); ++i) {
-    CHECK(gpus_[i].get()->recv_channels_.size() == gpus_.size() - 1);
+  for (int i = 0; i < params.size(); ++i) {
+    gpus_[i].reset(new GPU(*this, params, i));
+    sent_.add_child(&(gpus_[i]->sent_));
+    cycles_.add_child(&(gpus_[i]->cycles_));
   }
 }
 
@@ -85,84 +83,49 @@ void P2PSync<Dtype>::start() {
 template<typename Dtype>
 void P2PSync<Dtype>::stop() {
   for (int i = 0; i < gpus_.size(); ++i) {
-    gpus_[i].get()->stop();
+    gpus_[i].get()->stop(false);
+  }
+  for (int i = 0; i < gpus_.size(); ++i) {
+    gpus_[i].get()->stop(true);
   }
 }
 
 //
 
 template<typename Dtype>
-P2PSync<Dtype>::Multicast::Multicast(int source_device,
-                                     vector<int> target_devices)
-    : chunk_() {
+P2PSync<Dtype>::Multicast::Multicast(const GPU& gpu)
+    : index_(gpu.index()),
+      source_(),
+      targets_(gpu.params().size()),
+      callbacks_(gpu.params().size()),
+      pending_targets_(1),
+      chunk_() {
   int initial_device;
   CUDA_CHECK(cudaGetDevice(&initial_device));
-  const unsigned int flags = cudaEventDisableTiming;
 
-  CUDA_CHECK(cudaSetDevice(source_device));
+  CUDA_CHECK(cudaSetDevice(gpu.params()[index_]->device()));
   CUDA_CHECK(cudaMalloc((void** ) &source_, CHUNK * sizeof(Dtype)));
-  CUDA_CHECK(cudaEventCreateWithFlags(&source_event_, flags));
 
-  for (int i = 0; i < target_devices.size(); ++i) {
-    CUDA_CHECK(cudaSetDevice(target_devices[i]));
-    CUDA_CHECK(cudaMalloc((void** ) &targets_[i], CHUNK * sizeof(Dtype)));
-    CUDA_CHECK(cudaEventCreateWithFlags(&target_events_[i], flags));
+  for (int i = 0; i < targets_.size(); ++i) {
+    if (i != index_) {
+      CUDA_CHECK(cudaSetDevice(gpu.params()[i]->device()));
+      CUDA_CHECK(cudaMalloc((void** ) &targets_[i], CHUNK * sizeof(Dtype)));
+    }
+    callbacks_[i].queue_ = &gpu.sync().gpus()[i]->queue_;
+    callbacks_[i].multicast_ = this;
   }
+
   CUDA_CHECK(cudaSetDevice(initial_device));
 }
 
 template<typename Dtype>
 P2PSync<Dtype>::Multicast::~Multicast() {
   for (int i = 0; i < targets_.size(); ++i) {
-    CUDA_CHECK(cudaEventDestroy(target_events_[i]));
-    CUDA_CHECK(cudaFree((void** ) &targets_[i]));
-  }
-  CUDA_CHECK(cudaEventDestroy(source_event_));
-  CUDA_CHECK(cudaFree((void** ) &source_));
-}
-
-template<typename Dtype>
-bool P2PSync<Dtype>::Multicast::target_events_done() const {
-  for (int i = 0; i < target_events_.size(); ++i) {
-    if (cudaEventQuery(target_events_[i]) != cudaSuccess) {
-      return false;
+    if (i != index_) {
+      CUDA_CHECK(cudaFree((void* ) targets_[i]));
     }
   }
-  return true;
-}
-
-target_events_done
-
-//
-
-template<typename Dtype>
-P2PSync<Dtype>::Channel::Channel(int source_device, int target_device)
-    : source_device_(source_device),
-      target_device_(target_device),
-      sent_(
-          "sent " + lexical_cast < string
-              > (source_device) + "->" + lexical_cast < string
-              > (target_device),
-          CHUNK * sizeof(Dtype)),
-      recv_(
-          "recv " + lexical_cast < string
-              > (source_device) + "<-" + lexical_cast < string
-              > (target_device),
-          CHUNK * sizeof(Dtype)) {
-  for (int i = 0; i < LENGTH; ++i) {
-    free_.push(new Message(source_device, target_device));
-  }
-}
-
-template<typename Dtype>
-P2PSync<Dtype>::Channel::~Channel() {
-  Message* message;
-  while (free_.try_pop(message)) {
-    delete message;
-  }
-  while (full_.try_pop(message)) {
-    delete message;
-  }
+  CUDA_CHECK(cudaFree((void* ) source_));
 }
 
 //
@@ -174,152 +137,145 @@ P2PSync<Dtype>::GPU::GPU(const P2PSync& sync,
       params_(params),
       index_(index),
       chunks_(chunks(params[0]->len_used())),
-      sent_("sent", CHUNK * sizeof(Dtype)),
-      recv_("recv", CHUNK * sizeof(Dtype)),
+      sent_("gpu " + lexical_cast<string>(params[index]->device()),
+            CHUNK * sizeof(Dtype)),
+      sent_to_each_(params.size()),
       cycles_("cycles") {
 
-  int initial_device;
-  CUDA_CHECK(cudaGetDevice(&initial_device));
-  const int device = params[index]->device();
-  CUDA_CHECK(cudaSetDevice(device));
-
+  // Perf counters
   for (int i = 0; i < params.size(); ++i) {
-    if (i != index) {
-      const int peer = params[i]->device();
-
-      // Enable p2p access to each device
-      int access;
-      CUDA_CHECK(cudaDeviceCanAccessPeer(&access, device, peer));
-      CHECK(access) << "GPU " << device << " cannot access GPU " << peer;
-      CUDA_CHECK(cudaDeviceEnablePeerAccess(peer, 0));
-
-      // Create channels
-      Channel* channel = new Channel(device, peer);
-      send_channels_.push_back(channel);
-      sent_.add_child(&channel->sent_);
-    }
+    string peer(lexical_cast<string>(params[i]->device()));
+    Meter* m = new Meter("-> " + peer, CHUNK * sizeof(Dtype));
+    sent_.add_child(m);
+    sent_to_each_[i].reset(m);
   }
-  CUDA_CHECK(cudaSetDevice(initial_device));
 }
 
 template<typename Dtype>
 P2PSync<Dtype>::GPU::~GPU() {
   // All sync threads must have been stopped earlier
   CHECK(must_stop());
-
-  for (int i = 0; i < send_channels_.size(); ++i) {
-    delete send_channels_[i];
-  }
 }
 
 template<typename Dtype>
 void P2PSync<Dtype>::GPU::GPU::run() {
-  CUDA_CHECK(cudaSetDevice(params_[index_]->device()));
   const int device = params_[index_]->device();
-  if (device) {
-  }  // TODO just for debug
+  CUDA_CHECK(cudaSetDevice(device));
+
+  // Enable p2p access to each device
+  for (int i = 0; i < params_.size(); ++i) {
+    if (i != index_) {
+      CUDA_CHECK(cudaDeviceEnablePeerAccess(params_[i]->device(), 0));
+    }
+  }
 
   // Create async stream
   cudaStream_t stream;
-  CUDA_CHECK(cudaStreamCreateWithFlags(&stream, cudaStreamNonBlocking));
+  //  CUDA_CHECK(cudaStreamCreateWithFlags(&stream, cudaStreamNonBlocking));
+  int least, greatest;
+  cudaDeviceGetStreamPriorityRange(&least, &greatest);
+  cudaStreamCreateWithPriority(&stream, cudaStreamNonBlocking, least);
 
   // Allocate weight copy to measure gradient
   size_t size = params_[index_]->len_buff() * sizeof(Dtype);
   Dtype* copy;
   CUDA_CHECK(cudaMalloc((void** ) &copy, size));
 
-  // Explicit for debug purposes
+  // Copy current weights
   Dtype* data = params_[index_]->data();
+  // Explicit for debug purposes
   cudaMemcpyKind dev2dev = cudaMemcpyDeviceToDevice;
   CUDA_CHECK(cudaMemcpy(copy, data, size, dev2dev));
 
-  deque<Multicast*> free, sending, sent;
+  // Create queues and buffers
+  for (int i = 0; i < QUEUE; ++i) {
+    queue_.push(new Multicast(*this));
+  }
+
+  sync_.barrier_->wait();
   uint32_t chunk = 0;
 
-  // Dtype* hist = this->params_.hist();
-  // sleep(10000);
+  try {
+    while (!must_stop()) {
+      Multicast* m = queue_.pop();
 
-  while (!must_stop()) {
-    Multicast* m;
-
-    if (!free.empty()) {
-      m = free.front();
-      if (m->target_events_done()) {
-        if (params_[index_]->device() >= 0) {
-          free.pop();
+      if (m->index_ == index_) {  // Multicast is on initial GPU
+        // Wait until all targets are done with their buffer
+        if (--m->pending_targets_ == 0) {
+          // Measure gradient
           size_t offset = chunk * CHUNK;
           p2p_sync_send<Dtype>(data, copy, offset, m->source_, stream);
           m->chunk_ = chunk;
-          CUDA_CHECK(cudaEventRecord(m->source_event_, stream));
-          sending.push_back(m);
+
+          // Send gradient
+          m->pending_targets_ = sync_.gpus_.size() - 1;
+          for (int i = 0; i < sync_.gpus_.size(); ++i) {
+            if (i != index_) {
+              CUDA_CHECK(
+                  cudaMemcpyAsync(m->targets_[i], m->source_,  //
+                                  CHUNK * sizeof(Dtype), dev2dev, stream));
+              Callback* c = &m->callbacks_[i];
+              cudaStreamAddCallback(stream, add_to_queue, (void*) c, 0);
+              sent_to_each_[i]->tick();
+            }
+          }
           if (++chunk == chunks_) {
             chunk = 0;
-            cycles_++;
+            cycles_.tick();
           }
         }
+      } else {  // Multicast arrived at a target
+        // Apply gradient
+        size_t offset = m->chunk_ * CHUNK;
+        p2p_sync_recv<Dtype>(data, copy, offset, m->targets_[index_], stream);
+        Callback* c = &m->callbacks_[m->index_];
+        cudaStreamAddCallback(stream, add_to_queue, (void*) c, 0);
       }
     }
-
-    if (!sending.empty()) {
-      m = free.front();
-      if(cudaEventQuery(message->target_done_) == cudaSuccess) {
-
-      if (m->target_events_done()) {
-      }
+    throw boost::thread_interrupted();
+  } catch (...) {
+    // Wait for callbacks
+    cudaStreamSynchronize(stream);
+    sync_.barrier_->wait();
+    Multicast* m;
+    // Put back all m on their own GPU
+    vector<Multicast*> tmp;
+    while (queue_.try_pop(m)) {
+      tmp.push_back(m);
     }
-
-    if (all_ready_to_send) {
-      for (int i = 0; i < send_channels_.size(); ++i) {
-        Channel& channel = *(send_channels_[i]);
-        Message* message;
-
-        // Compute data to send when a free buffer is available
-        if (channel.free_.try_peek(message)
-            && cudaEventQuery(message->target_done_) == cudaSuccess) {
-        }
-        // Send message to target
-        if (!channel.pending_.empty()) {
-          message = channel.pending_.front();
-          if (cudaEventQuery(message->source_done_) == cudaSuccess) {
-            channel.pending_.pop_front();
-            CUDA_CHECK(cudaMemcpyAsync(message->target_, message->source_,  //
-                                       CHUNK * sizeof(Dtype), dev2dev, stream));
-            CUDA_CHECK(cudaEventRecord(message->source_done_, stream));
-            channel.full_.push(message);
-            channel.sent_++;
-          }
-        }
-      }
+    sync_.barrier_->wait();
+    for (int i = 0; i < tmp.size(); ++i) {
+      m = tmp[i];
+      sync_.gpus_[m->index_]->queue_.push(m);
     }
+    sync_.barrier_->wait();
+    // Free only once
+    std::set<Multicast*> set;
+    while (queue_.try_pop(m)) {
+      set.insert(m);
+    }
+    for (typename std::set<Multicast*>::iterator it = set.begin();
+        it != set.end(); ++it) {
+      delete *it;
+    }
+    sync_.barrier_->wait();
 
-    for (int i = 0; i < recv_channels_.size(); ++i) {
-      Channel& channel = *(recv_channels_[i]);
-      Message* message;
-
-      // Receive message when async transfer is done
-      if (channel.full_.try_peek(message)) {
-        int q = cudaEventQuery(message->source_done_);
-        CHECK(q == cudaSuccess || q == cudaErrorNotReady);
-        if (q == cudaSuccess) {
-          channel.full_.pop();
-
-          size_t offset = message->chunk_ * CHUNK;
-          p2p_sync_recv<Dtype>(data, copy, offset, message->target_, stream);
-          CUDA_CHECK(cudaEventRecord(message->target_done_, stream));
-          channel.free_.push(message);
-          channel.recv_++;
-        }
+    CUDA_CHECK(cudaFree((void* ) copy));
+    CUDA_CHECK(cudaStreamDestroy(stream));
+    for (int i = 0; i < params_.size(); ++i) {
+      if (i != index_) {
+        CUDA_CHECK(cudaDeviceDisablePeerAccess(params_[i]->device()));
       }
     }
   }
+}
 
-  CUDA_CHECK(cudaFree((void* ) copy));
-  for (int i = 0; i < params_.size(); ++i) {
-    if (i != index_) {
-      CUDA_CHECK(cudaDeviceDisablePeerAccess(params_[i]->device()));
-    }
-  }
-  CUDA_CHECK(cudaStreamDestroy(stream));
+template<typename Dtype>
+void CUDART_CB P2PSync<Dtype>::GPU::GPU::add_to_queue(cudaStream_t stream,
+                                                      cudaError_t status,
+                                                      void* data) {
+  Callback* c = (Callback*) data;
+  c->queue_->push(c->multicast_);
 }
 
 INSTANTIATE_CLASS(P2PSync);

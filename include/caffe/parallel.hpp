@@ -18,6 +18,15 @@ using boost::posix_time::ptime;
 using boost::posix_time::microsec_clock;
 using std::deque;
 
+/**
+ Forward declare boost::thread instead of including boost/thread.hpp
+ to avoid a boost/NVCC issues (#1009, #1010) on OSX. Also fails on
+ Linux CUDA 7.
+ */
+namespace boost {
+class barrier;
+}
+
 // The following classes enable data-parallel training, over multiple CPU
 // cores, GPUs, and machines. It uses asynchronous SGD to independently max out
 // networking and compute resources.
@@ -25,7 +34,7 @@ using std::deque;
 namespace caffe {
 
 // Helper to write components running in their own threads
-class Threaded : public InternalThread {
+class Threaded : protected InternalThread {
  public:
   Threaded()
       : InternalThread() {
@@ -34,8 +43,12 @@ class Threaded : public InternalThread {
   virtual void start() {
     this->StartInternalThread();
   }
-  virtual void stop() {
-    this->StopInternalThread();
+  virtual void stop(bool wait = false) {
+    if (wait) {
+      this->StopInternalThread();
+    } else {
+      this->RequestInternalThreadStop();
+    }
   }
 
   virtual void run() = 0;
@@ -75,7 +88,7 @@ class Meter {
   inline void value(uint64_t value) {
     value_ = value;
   }
-  inline void operator++(int) {
+  inline void tick() {
     value_++;
   }
   void add_child(const Meter* meter) {
@@ -229,24 +242,39 @@ class P2PSync {
 
   // TODO bench, auto tune?
   static const int CHUNK = 262144;
+  static const int QUEUE = 4;
 
  protected:
+  static vector<shared_ptr<GPU> > create_gpus(
+      const vector<GPUParams<Dtype>*>& params);
+
+  class Callback;
+
   // Emulates P2P multicast by sending from one GPU to others in group
   class Multicast {
    public:
-    Multicast(int source_device, vector<int> target_devices);
+    Multicast(const GPU& gpu);
     ~Multicast();
 
-    bool target_events_done() const;
-
     const static int LENGTH = CHUNK * sizeof(Dtype);
+    const int index_;
     Dtype* source_;
     vector<Dtype*> targets_;
-    cudaEvent_t source_event_;
-    vector<cudaEvent_t> target_events_;
+    vector<Callback> callbacks_;
+    uint32_t pending_targets_;
     uint32_t chunk_;
 
   DISABLE_COPY_AND_ASSIGN(Multicast);
+  };
+
+  class Callback {
+   public:
+    Callback()
+        : queue_(NULL),
+          multicast_(NULL) {
+    }
+    blocking_queue<Multicast*>* queue_;
+    Multicast* multicast_;
   };
 
  public:
@@ -258,6 +286,12 @@ class P2PSync {
 
     void run();
 
+    static void CUDART_CB add_to_queue(cudaStream_t stream, cudaError_t status,
+                                       void* data);
+
+    inline const P2PSync& sync() const {
+      return sync_;
+    }
     inline const vector<GPUParams<Dtype>*>& params() const {
       return params_;
     }
@@ -266,9 +300,6 @@ class P2PSync {
     }
     inline const Meter& sent() const {
       return sent_;
-    }
-    inline const Meter& recv() const {
-      return recv_;
     }
     inline const Meter& cycles() {
       return cycles_;
@@ -281,11 +312,12 @@ class P2PSync {
     const uint32_t chunks_;
 
     // TODO switch to spsc_queue (Boost 1.53 not packaged on Ubuntu 12.04)
-    const static int RECV_QUEUE_LENGTH = 8;
-    blocking_queue<Multicast*> recv_queue_;
+    blocking_queue<Multicast*> queue_;
 
     // Perf counters
-    Meter sent_, recv_, cycles_;
+    Meter sent_;
+    vector<shared_ptr<Meter> > sent_to_each_;
+    Meter cycles_;
 
     template<typename U>
     friend class P2PSync;
@@ -294,7 +326,12 @@ class P2PSync {
   };
 
  protected:
+  const shared_ptr<boost::barrier> barrier_;
   vector<shared_ptr<GPU> > gpus_;
+
+  // Perf counters
+  Meter sent_;
+  Meter cycles_;
 
 DISABLE_COPY_AND_ASSIGN(P2PSync);
 };

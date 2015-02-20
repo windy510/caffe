@@ -26,14 +26,20 @@ bool InternalThread::StartInternalThread() {
   return true;
 }
 
-/** Will not return until the internal thread has exited. */
-bool InternalThread::StopInternalThread() {
+void InternalThread::RequestInternalThreadStop() {
   must_stop_ = true;
   if (is_started()) {
     thread_->interrupt();
+  }
+}
+
+bool InternalThread::StopInternalThread() {
+  RequestInternalThreadStop();
+  if (is_started()) {
     try {
       thread_->join();
-    } catch (...) {
+    } catch (std::exception& ex) {
+      LOG(ERROR) << ex.what() ;
       return false;
     }
   }
