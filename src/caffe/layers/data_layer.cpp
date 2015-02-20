@@ -277,3 +277,4 @@ INSTANTIATE_CLASS(DataLayer);
 REGISTER_LAYER_CLASS(Data);
 
 }  // namespace caffe
+
