@@ -17,9 +17,8 @@ namespace caffe {
 template <typename Dtype>
 class Solver {
  public:
-  explicit Solver(const SolverParameter& param);
-  explicit Solver(const string& param_file);
-  void Init(const SolverParameter& param);
+  explicit Solver(const SolverParameter& param, bool init = true);
+  void Init();
   void InitTrainNet();
   void InitTestNets();
   // The main entry of the solver function. In default, iter will be zero. Pass
@@ -32,15 +31,16 @@ class Solver {
   // function that restores the state from a SolverState protocol buffer.
   void Restore(const char* resume_file);
   virtual ~Solver() {}
-  inline shared_ptr<Net<Dtype> > net() { return net_; }
+  inline const SolverParameter& param() const { return param_; }
+  inline shared_ptr<Net<Dtype> > net() const { return net_; }
   inline const vector<shared_ptr<Net<Dtype> > >& test_nets() {
     return test_nets_;
   }
-  int iter() { return iter_; }
+  inline int iter() const  { return iter_; }
 
  protected:
-  // Get the update value for the current iteration.
-  virtual void ComputeUpdateValue() = 0;
+  // Get and apply the update value for the current iteration.
+  virtual void Iteration() = 0;
   // The Solver::Snapshot function implements the basic snapshotting utility
   // that stores the learned net. You should implement the SnapshotSolverState()
   // function that produces a SolverState protocol buffer that needs to be
@@ -70,17 +70,22 @@ class Solver {
 template <typename Dtype>
 class SGDSolver : public Solver<Dtype> {
  public:
-  explicit SGDSolver(const SolverParameter& param)
-      : Solver<Dtype>(param) { PreSolve(); }
-  explicit SGDSolver(const string& param_file)
-      : Solver<Dtype>(param_file) { PreSolve(); }
+  explicit SGDSolver(const SolverParameter& param, bool init = true)
+      : Solver<Dtype>(param, init) {
+    if (init) {
+      PreSolve();
+    }
+  }
+  virtual ~SGDSolver() {}
 
-  const vector<shared_ptr<Blob<Dtype> > >& history() { return history_; }
+  const vector<shared_ptr<Blob<Dtype> > >& history() const { return history_; }
 
  protected:
   void PreSolve();
   Dtype GetLearningRate();
-  virtual void ComputeUpdateValue();
+  virtual void Iteration();
+  virtual void Regularize(int param_id);
+  virtual void ComputeUpdateValue(int param_id, Dtype rate);
   virtual void ClipGradients();
   virtual void SnapshotSolverState(SolverState * state);
   virtual void RestoreSolverState(const SolverState& state);
@@ -98,11 +103,10 @@ class NesterovSolver : public SGDSolver<Dtype> {
  public:
   explicit NesterovSolver(const SolverParameter& param)
       : SGDSolver<Dtype>(param) {}
-  explicit NesterovSolver(const string& param_file)
-      : SGDSolver<Dtype>(param_file) {}
+  virtual ~NesterovSolver() {}
 
  protected:
-  virtual void ComputeUpdateValue();
+  virtual void ComputeUpdateValue(int param_id, Dtype rate);
 
   DISABLE_COPY_AND_ASSIGN(NesterovSolver);
 };
@@ -111,16 +115,14 @@ template <typename Dtype>
 class AdaGradSolver : public SGDSolver<Dtype> {
  public:
   explicit AdaGradSolver(const SolverParameter& param)
-      : SGDSolver<Dtype>(param) { constructor_sanity_check(); }
-  explicit AdaGradSolver(const string& param_file)
-      : SGDSolver<Dtype>(param_file) { constructor_sanity_check(); }
-
- protected:
-  virtual void ComputeUpdateValue();
-  void constructor_sanity_check() {
+      : SGDSolver<Dtype>(param) {
     CHECK_EQ(0, this->param_.momentum())
         << "Momentum cannot be used with AdaGrad.";
-  }
+}
+  virtual ~AdaGradSolver() {}
+
+ protected:
+  virtual void ComputeUpdateValue(int param_id, Dtype rate);
 
   DISABLE_COPY_AND_ASSIGN(AdaGradSolver);
 };

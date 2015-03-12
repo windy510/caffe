@@ -33,11 +33,6 @@ void blocking_queue<T>::push(const T& t) {
 }
 
 template<typename T>
-bool blocking_queue<T>::empty() const {
-  boost::mutex::scoped_lock lock(sync_.get()->mutex_);
-  return queue_.empty();
-}
-template<typename T>
 bool blocking_queue<T>::try_pop(T* t) {
   boost::mutex::scoped_lock lock(sync_.get()->mutex_);
 
@@ -71,6 +66,18 @@ T blocking_queue<T>::pop(const string& log_on_wait) {
 }
 
 template<typename T>
+bool blocking_queue<T>::try_peek(T* t) {
+  boost::mutex::scoped_lock lock(sync_.get()->mutex_);
+
+  if (queue_.empty()) {
+    return false;
+  }
+
+  *t = queue_.front();
+  return true;
+}
+
+template<typename T>
 T blocking_queue<T>::peek() {
   boost::mutex::scoped_lock lock(sync_.get()->mutex_);
 
@@ -78,6 +85,12 @@ T blocking_queue<T>::peek() {
     sync_.get()->condition_.wait(lock);
 
   return queue_.front();
+}
+
+template<typename T>
+size_t blocking_queue<T>::size() const {
+  boost::mutex::scoped_lock lock(sync_.get()->mutex_);
+  return queue_.size();
 }
 
 template class blocking_queue<Batch<float>*>;

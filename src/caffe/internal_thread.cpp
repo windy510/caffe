@@ -33,7 +33,8 @@ bool InternalThread::StopInternalThread() {
     thread_->interrupt();
     try {
       thread_->join();
-    } catch (...) {
+    } catch (std::exception& ex) {
+      LOG(ERROR) << ex.what();
       return false;
     }
   }

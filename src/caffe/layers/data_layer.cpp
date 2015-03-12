@@ -256,7 +256,7 @@ DataLoader* DataLayer<Dtype>::next_loader() {
   if (data.probability_size() == 0) {
     for (int i = 0; i < loaders_.size(); ++i) {
       DataLoader* loader = loaders_[i].get();
-      if (!loader->full().empty()) {
+      if (loader->full().size() != 0) {
         return loader;
       }
     }
