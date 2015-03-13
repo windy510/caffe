@@ -197,49 +197,57 @@ void DataLayer<Dtype>::load_batch(Batch<Dtype>* batch) {
   bool force_color = this->layer_param_.data_param().force_encoded_color();
   for (int item_id = 0; item_id < batch_size; ++item_id) {
     timer.Start();
-    DataLoader* loader = next_loader();
-    const Datum& datum = *(loader->full().pop("Waiting on data loader"));
+    for (int attempts = 0;; ++attempts) {
+      DataLoader* loader = next_loader();
+      const Datum& datum = *(loader->full().pop("Waiting on data loader"));
 
-    // Reshape on single input batches for inputs of varying dimension.
-    if (batch_size == 1 && crop_size == 0) {
-      batch->data_.Reshape(1, datum.channels(),
-          datum.height(), datum.width());
-      this->transformed_data_.Reshape(1, datum.channels(),
-          datum.height(), datum.width());
-    }
-
-    cv::Mat cv_img;
-    if (datum.encoded()) {
-      if (force_color) {
-        cv_img = DecodeDatumToCVMat(datum, true);
-      } else {
-        cv_img = DecodeDatumToCVMatNative(datum);
+      // Reshape on single input batches for inputs of varying dimension.
+      if (batch_size == 1 && crop_size == 0) {
+        batch->data_.Reshape(1, datum.channels(),
+            datum.height(), datum.width());
+        this->transformed_data_.Reshape(1, datum.channels(),
+            datum.height(), datum.width());
       }
-      if (cv_img.channels() != this->transformed_data_.channels()) {
-        LOG(WARNING) << "Your dataset contains encoded images with mixed "
-        << "channel sizes. Consider adding a 'force_color' flag to the "
-        << "model definition, or rebuild your dataset using "
-        << "convert_imageset.";
+
+      try {
+        cv::Mat cv_img;
+        if (datum.encoded()) {
+          if (force_color) {
+            cv_img = DecodeDatumToCVMat(datum, true);
+          } else {
+            cv_img = DecodeDatumToCVMatNative(datum);
+          }
+          if (cv_img.channels() != this->transformed_data_.channels()) {
+            LOG(WARNING) << "Your dataset contains encoded images with mixed "
+            << "channel sizes. Consider adding a 'force_color' flag to the "
+            << "model definition, or rebuild your dataset using "
+            << "convert_imageset.";
+          }
+        }
+        read_time += timer.MicroSeconds();
+        timer.Start();
+
+        // Apply data transformations (mirror, scale, crop...)
+        Dtype* top_data = batch->data_.mutable_cpu_data();
+        int offset = batch->data_.offset(item_id);
+        this->transformed_data_.set_cpu_data(top_data + offset);
+        if (datum.encoded()) {
+          this->data_transformer_->Transform(cv_img, &(this->transformed_data_));
+        } else {
+          this->data_transformer_->Transform(datum, &(this->transformed_data_));
+        }
+        if (this->output_labels_) {
+          batch->label_.mutable_cpu_data()[item_id] = datum.label();
+        }
+        trans_time += timer.MicroSeconds();
+
+        loader->free().push(const_cast<Datum*>(&datum));
+        break;
+      } catch(...) {
+        LOG(INFO) << "Skip image";
       }
+      CHECK(attempts < 1000) << "Failed to decode images";
     }
-    read_time += timer.MicroSeconds();
-    timer.Start();
-
-    // Apply data transformations (mirror, scale, crop...)
-    Dtype* top_data = batch->data_.mutable_cpu_data();
-    int offset = batch->data_.offset(item_id);
-    this->transformed_data_.set_cpu_data(top_data + offset);
-    if (datum.encoded()) {
-      this->data_transformer_->Transform(cv_img, &(this->transformed_data_));
-    } else {
-      this->data_transformer_->Transform(datum, &(this->transformed_data_));
-    }
-    if (this->output_labels_) {
-      batch->label_.mutable_cpu_data()[item_id] = datum.label();
-    }
-    trans_time += timer.MicroSeconds();
-
-    loader->free().push(const_cast<Datum*>(&datum));
   }
   batch_timer.Stop();
   DLOG(INFO) << "Prefetch batch: " << batch_timer.MilliSeconds() << " ms.";

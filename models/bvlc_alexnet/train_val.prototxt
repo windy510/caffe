@@ -13,9 +13,15 @@ layer {
     mean_file: "data/ilsvrc12/imagenet_mean.binaryproto"
   }
   data_param {
-    source: "examples/imagenet/ilsvrc12_train_lmdb"
+    source: "/scratch/imagenet_1000_train"
+    source: "/data/shared/ilsvrc12/imagenet_1000_train"
+#    source: "/dev/shm/imagenet_1000_train"
+#    source: "/data/shared/ilsvrc12/imagenet_1000_train_uncompressed"
     batch_size: 256
     backend: LMDB
+    backend: LMDB
+    prefetch: 8
+    force_encoded_color: true
   }
 }
 layer {
@@ -32,9 +38,11 @@ layer {
     mean_file: "data/ilsvrc12/imagenet_mean.binaryproto"
   }
   data_param {
-    source: "examples/imagenet/ilsvrc12_val_lmdb"
+    source: "/scratch/imagenet_1000_val"
+#    source: "/data/shared/ilsvrc12/imagenet_1000_val_uncompressed"
     batch_size: 50
     backend: LMDB
+    force_encoded_color: true
   }
 }
 layer {
