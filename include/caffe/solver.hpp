@@ -5,8 +5,11 @@
 #include <vector>
 
 #include "caffe/net.hpp"
+#include "caffe/util/benchmark.hpp"
 
 namespace caffe {
+
+using boost::posix_time::ptime;
 
 /**
  * @brief An interface for classes that perform optimization on Net%s.
@@ -32,15 +35,28 @@ class Solver {
   // function that restores the state from a SolverState protocol buffer.
   void Restore(const char* resume_file);
   virtual ~Solver() {}
-  inline shared_ptr<Net<Dtype> > net() { return net_; }
+  inline const SolverParameter& param() const { return param_; }
+  inline shared_ptr<Net<Dtype> > net() const { return net_; }
   inline const vector<shared_ptr<Net<Dtype> > >& test_nets() {
     return test_nets_;
   }
-  int iter() { return iter_; }
+  inline int iter() const  { return iter_; }
+
+  // Invoked before and after an iteration
+  class Callback {
+   public:
+    virtual void before_iteration(Timer* timer, ostringstream* timing) = 0;
+    virtual void finish_iteration(Timer* timer, ostringstream* timing) = 0;
+  };
+  Callback* callback() const { return callback_; }
+  void set_callback(Callback* value) {
+    CHECK(!callback_ && value);
+    callback_ = value;
+  }
 
  protected:
-  // Get the update value for the current iteration.
-  virtual void ComputeUpdateValue() = 0;
+  // Get and apply the update value for the current iteration.
+  virtual void Iteration() {}
   // The Solver::Snapshot function implements the basic snapshotting utility
   // that stores the learned net. You should implement the SnapshotSolverState()
   // function that produces a SolverState protocol buffer that needs to be
@@ -49,8 +65,12 @@ class Solver {
   // The test routine
   void TestAll();
   void Test(const int test_net_id = 0);
-  virtual void SnapshotSolverState(SolverState* state) = 0;
-  virtual void RestoreSolverState(const SolverState& state) = 0;
+  virtual void SnapshotSolverState(SolverState* state) {
+    CHECK(false) << "Should be overriden";
+  }
+  virtual void RestoreSolverState(const SolverState& state) {
+    CHECK(false) << "Should be overriden";
+  }
   void DisplayOutputBlobs(const int net_id);
 
   SolverParameter param_;
@@ -58,6 +78,7 @@ class Solver {
   int current_step_;
   shared_ptr<Net<Dtype> > net_;
   vector<shared_ptr<Net<Dtype> > > test_nets_;
+  Callback* callback_;
 
   DISABLE_COPY_AND_ASSIGN(Solver);
 };
@@ -75,12 +96,14 @@ class SGDSolver : public Solver<Dtype> {
   explicit SGDSolver(const string& param_file)
       : Solver<Dtype>(param_file) { PreSolve(); }
 
-  const vector<shared_ptr<Blob<Dtype> > >& history() { return history_; }
+  const vector<shared_ptr<Blob<Dtype> > >& history() const { return history_; }
 
  protected:
   void PreSolve();
   Dtype GetLearningRate();
-  virtual void ComputeUpdateValue();
+  virtual void Iteration();
+  virtual void Regularize(int param_id);
+  virtual void ComputeUpdateValue(int param_id, Dtype rate);
   virtual void ClipGradients();
   virtual void SnapshotSolverState(SolverState * state);
   virtual void RestoreSolverState(const SolverState& state);
@@ -89,6 +112,10 @@ class SGDSolver : public Solver<Dtype> {
   // temp maintains other information that might be needed in computation
   //   of gradients/updates and is not needed in snapshots
   vector<shared_ptr<Blob<Dtype> > > history_, update_, temp_;
+
+  // Timing
+  ptime last_time_;
+  double last_iter_;
 
   DISABLE_COPY_AND_ASSIGN(SGDSolver);
 };
@@ -102,7 +129,7 @@ class NesterovSolver : public SGDSolver<Dtype> {
       : SGDSolver<Dtype>(param_file) {}
 
  protected:
-  virtual void ComputeUpdateValue();
+  virtual void ComputeUpdateValue(int param_id, Dtype rate);
 
   DISABLE_COPY_AND_ASSIGN(NesterovSolver);
 };
@@ -114,9 +141,10 @@ class AdaGradSolver : public SGDSolver<Dtype> {
       : SGDSolver<Dtype>(param) { constructor_sanity_check(); }
   explicit AdaGradSolver(const string& param_file)
       : SGDSolver<Dtype>(param_file) { constructor_sanity_check(); }
+  virtual ~AdaGradSolver() {}
 
  protected:
-  virtual void ComputeUpdateValue();
+  virtual void ComputeUpdateValue(int param_id, Dtype rate);
   void constructor_sanity_check() {
     CHECK_EQ(0, this->param_.momentum())
         << "Momentum cannot be used with AdaGrad.";

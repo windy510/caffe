@@ -16,14 +16,16 @@ class blocking_queue {
 
   void push(const T& t);
 
-  bool empty() const;
-
   bool try_pop(T* t);
 
   T pop(const string& log_on_wait = "");
 
+  bool try_peek(T* t);
+
   // Return element without removing it
   T peek();
+
+  size_t size() const;
 
   inline uint64_t pops() {
     return pops_;

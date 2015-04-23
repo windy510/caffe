@@ -46,7 +46,7 @@ class InternalThread {
   Caffe::Brew mode_;
   int rand_seed_;
   int solver_count_;
-  int solver_index_;
+  bool root_solver_;
 };
 
 }  // namespace caffe
