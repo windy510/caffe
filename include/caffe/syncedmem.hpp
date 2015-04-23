@@ -10,20 +10,24 @@ namespace caffe {
 
 inline void CaffeMallocHost(void** ptr, size_t size) {
 #ifndef CPU_ONLY
-  CUDA_CHECK(cudaMallocHost(ptr, size));
-  CHECK(*ptr) << "cudaMallocHost of size " << size << " failed";
-#else
+  if (Caffe::mode() == Caffe::GPU) {
+    CUDA_CHECK(cudaMallocHost(ptr, size));
+    CHECK(*ptr) << "cudaMallocHost of size " << size << " failed";
+    return;
+  }
+#endif
   *ptr = malloc(size);
   CHECK(*ptr) << "host allocation of size " << size << " failed";
-#endif
 }
 
 inline void CaffeFreeHost(void* ptr) {
 #ifndef CPU_ONLY
-  CUDA_CHECK(cudaFreeHost(ptr));
-#else
-  free(ptr);
+  if (Caffe::mode() == Caffe::GPU) {
+    CUDA_CHECK(cudaFreeHost(ptr));
+    return;
+  }
 #endif
+  free(ptr);
 }
 
 /**
