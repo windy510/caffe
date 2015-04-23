@@ -97,7 +97,7 @@ void DataLayer<Dtype>::DataLayerSetUp(const vector<Blob<Dtype>*>& bottom,
 }
 
 // This function is called on prefetch thread
-template <typename Dtype>
+template<typename Dtype>
 void DataLayer<Dtype>::load_batch(Batch<Dtype>* batch) {
   CPUTimer batch_timer;
   batch_timer.Start();
@@ -119,10 +119,10 @@ void DataLayer<Dtype>::load_batch(Batch<Dtype>* batch) {
 
       // Reshape on single input batches for inputs of varying dimension.
       if (batch_size == 1 && crop_size == 0) {
-        batch->data_.Reshape(1, datum.channels(),
-            datum.height(), datum.width());
-        this->transformed_data_.Reshape(1, datum.channels(),
-            datum.height(), datum.width());
+        batch->data_.Reshape(1, datum.channels(), datum.height(),
+                             datum.width());
+        this->transformed_data_.Reshape(1, datum.channels(), datum.height(),
+                                        datum.width());
       }
       deque_time += timer.MicroSeconds();
 
@@ -136,10 +136,10 @@ void DataLayer<Dtype>::load_batch(Batch<Dtype>* batch) {
             cv_img = DecodeDatumToCVMatNative(datum);
           }
           if (cv_img.channels() != this->transformed_data_.channels()) {
-            LOG(WARNING) << "Your dataset contains encoded images with mixed "
-            << "channel sizes. Consider adding a 'force_color' flag to the "
-            << "model definition, or rebuild your dataset using "
-            << "convert_imageset.";
+            LOG(WARNING)<< "Your dataset contains encoded images with mixed "
+              << "channel sizes. Consider adding a 'force_color' flag to the "
+              << "model definition, or rebuild your dataset using "
+              << "convert_imageset.";
           }
         }
         decod_time += timer.MicroSeconds();
@@ -150,7 +150,8 @@ void DataLayer<Dtype>::load_batch(Batch<Dtype>* batch) {
         int offset = batch->data_.offset(item_id);
         this->transformed_data_.set_cpu_data(top_data + offset);
         if (datum.encoded()) {
-          this->data_transformer_->Transform(cv_img, &(this->transformed_data_));
+          this->data_transformer_->Transform(cv_img,
+                                             &(this->transformed_data_));
         } else {
           this->data_transformer_->Transform(datum, &(this->transformed_data_));
         }
@@ -161,10 +162,10 @@ void DataLayer<Dtype>::load_batch(Batch<Dtype>* batch) {
 
         reader->free().push(const_cast<Datum*>(&datum));
         break;
-      } catch(...) {
-        LOG(INFO) << "Skip image";
+      } catch (...) {
+        LOG(INFO)<< "Skip image";
       }
-      CHECK_LT(attempts, 1000) << "Failed to decode images";
+      CHECK_LT(attempts, 1000)<< "Failed to decode images";
     }
   }
   batch_timer.Stop();
