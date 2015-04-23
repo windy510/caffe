@@ -13,7 +13,6 @@ using caffe::Caffe;
 using caffe::Net;
 using caffe::Layer;
 using caffe::Solver;
-using caffe::P2PSync;
 using caffe::shared_ptr;
 using caffe::string;
 using caffe::Timer;
@@ -77,7 +76,9 @@ static void get_gpus(vector<int>* gpus) {
     }
   } else {
     int count = 0;
+#ifndef CPU_ONLY
     CUDA_CHECK(cudaGetDeviceCount(&count));
+#endif
     for (int i = 0; i < count; ++i) {
       gpus->push_back(i);
     }
@@ -162,7 +163,9 @@ int train() {
   }
 
   if (gpus.size() > 1) {
-    P2PSync<float>::run(solver, gpus);
+#ifndef CPU_ONLY
+    caffe::P2PSync<float>::run(solver, gpus);
+#endif
   } else {
     LOG(INFO) << "Starting Optimization";
     solver->Solve();
