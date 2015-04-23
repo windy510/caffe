@@ -10,7 +10,7 @@ namespace caffe {
 
 inline void CaffeMallocHost(void** ptr, size_t size) {
 #ifndef CPU_ONLY
-  cudaMallocHost(ptr, size);
+  CUDA_CHECK(cudaMallocHost(ptr, size));
   CHECK(*ptr) << "cudaMallocHost of size " << size << " failed";
 #else
   *ptr = malloc(size);
@@ -20,7 +20,7 @@ inline void CaffeMallocHost(void** ptr, size_t size) {
 
 inline void CaffeFreeHost(void* ptr) {
 #ifndef CPU_ONLY
-  cudaFreeHost(ptr);
+  CUDA_CHECK(cudaFreeHost(ptr));
 #else
   free(ptr);
 #endif
