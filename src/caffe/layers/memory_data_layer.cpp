@@ -1,5 +1,3 @@
-#include <opencv2/core/core.hpp>
-
 #include <vector>
 
 #include "caffe/data_layers.hpp"

@@ -1,5 +1,3 @@
-#include <opencv2/core/core.hpp>
-
 #include <string>
 #include <vector>
 
@@ -167,6 +165,8 @@ TYPED_TEST(MemoryDataLayerTest, AddDatumVectorDefaultTransform) {
   }
 }
 
+#ifndef NO_IO_DEPENDENCIES
+
 TYPED_TEST(MemoryDataLayerTest, AddMatVectorDefaultTransform) {
   typedef typename TypeParam::Dtype Dtype;
   LayerParameter param;
@@ -292,5 +292,7 @@ TYPED_TEST(MemoryDataLayerTest, TestSetBatchSize) {
     }
   }
 }
+
+#endif
 
 }  // namespace caffe

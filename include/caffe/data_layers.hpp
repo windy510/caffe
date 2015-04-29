@@ -6,9 +6,11 @@
 #include <vector>
 
 #include "boost/scoped_ptr.hpp"
+
 #ifndef NO_IO_DEPENDENCIES
 #include "hdf5.h"
 #endif
+
 #include "caffe/blob.hpp"
 #include "caffe/common.hpp"
 #include "caffe/data_transformer.hpp"
@@ -220,8 +222,6 @@ class HDF5OutputLayer : public Layer<Dtype> {
   Blob<Dtype> label_blob_;
 };
 
-#endif
-
 /**
  * @brief Provides data to the Net from image files.
  *
@@ -248,6 +248,8 @@ class ImageDataLayer : public BasePrefetchingDataLayer<Dtype> {
   vector<std::pair<std::string, int> > lines_;
   int lines_id_;
 };
+
+#endif
 
 /**
  * @brief Provides data to the Net from memory.
@@ -294,6 +296,8 @@ class MemoryDataLayer : public BaseDataLayer<Dtype> {
   bool has_new_data_;
 };
 
+#ifndef NO_IO_DEPENDENCIES
+
 /**
  * @brief Provides data to the Net from windows of images files, specified
  *        by a window data file.
@@ -329,6 +333,8 @@ class WindowDataLayer : public BasePrefetchingDataLayer<Dtype> {
   bool cache_images_;
   vector<std::pair<std::string, Datum > > image_database_cache_;
 };
+
+#endif
 
 }  // namespace caffe
 
