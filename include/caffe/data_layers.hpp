@@ -6,8 +6,9 @@
 #include <vector>
 
 #include "boost/scoped_ptr.hpp"
+#ifndef NO_IO_DEPENDENCIES
 #include "hdf5.h"
-
+#endif
 #include "caffe/blob.hpp"
 #include "caffe/common.hpp"
 #include "caffe/data_transformer.hpp"
@@ -134,6 +135,8 @@ class DummyDataLayer : public Layer<Dtype> {
   vector<bool> refill_;
 };
 
+#ifndef NO_IO_DEPENDENCIES
+
 /**
  * @brief Provides data to the Net from HDF5 files.
  *
@@ -216,6 +219,8 @@ class HDF5OutputLayer : public Layer<Dtype> {
   Blob<Dtype> data_blob_;
   Blob<Dtype> label_blob_;
 };
+
+#endif
 
 /**
  * @brief Provides data to the Net from image files.
