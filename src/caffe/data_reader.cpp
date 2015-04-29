@@ -15,9 +15,6 @@ using boost::weak_ptr;
 map<const string, weak_ptr<DataReader::Body> > DataReader::bodies_;
 static boost::mutex bodies_mutex_;
 
-// TODO single solver until multi-gpu merge
-static const int solver_count = 1;
-
 DataReader::DataReader(const LayerParameter& param)
     : queues_(new QueuePair(  //
         param.data_param().prefetch() * param.data_param().batch_size())) {
@@ -34,7 +31,7 @@ DataReader::DataReader(const LayerParameter& param)
   // Check a single net is trained at a time per process, whether single
   // or multi solver. This might also happen if two data layers have same
   // name and same source.
-  CHECK(body_->reader_queues_.size() <= solver_count);
+  CHECK(body_->reader_queues_.size() <= Caffe::solver_count());
 }
 
 DataReader::~DataReader() {
@@ -99,7 +96,7 @@ void DataReader::Body::InternalThreadEntry() {
       while (!must_stop()) {
         usleep(100 * 1000);
         boost::mutex::scoped_lock lock(bodies_mutex_);
-        if (reader_queues_.size() == solver_count) {
+        if (reader_queues_.size() == Caffe::solver_count()) {
           break;
         }
       }

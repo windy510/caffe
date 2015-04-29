@@ -2,6 +2,7 @@
 #include <string>
 
 #include "caffe/data_layers.hpp"
+#include "caffe/parallel.hpp"
 #include "caffe/util/blocking_queue.hpp"
 
 namespace caffe {
@@ -87,5 +88,7 @@ size_t BlockingQueue<T>::size() const {
 template class BlockingQueue<Batch<float>*>;
 template class BlockingQueue<Batch<double>*>;
 template class BlockingQueue<Datum*>;
+template class BlockingQueue<P2PSync<float>*>;
+template class BlockingQueue<P2PSync<double>*>;
 
 }  // namespace caffe
