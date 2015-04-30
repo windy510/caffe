@@ -7,6 +7,7 @@
 #include "caffe/net.hpp"
 #include "caffe/proto/caffe.pb.h"
 #include "caffe/solver.hpp"
+#include "caffe/util/benchmark.hpp"
 #include "caffe/util/io.hpp"
 #include "caffe/util/math_functions.hpp"
 #include "caffe/util/upgrade_proto.hpp"
@@ -15,13 +16,13 @@ namespace caffe {
 
 template <typename Dtype>
 Solver<Dtype>::Solver(const SolverParameter& param)
-    : net_(), callback_() {
+    : net_(), callback_(), iteration_timer_(), iterations_last_() {
   Init(param);
 }
 
 template <typename Dtype>
 Solver<Dtype>::Solver(const string& param_file)
-    : net_(), callback_() {
+    : net_(), callback_(), iteration_timer_(), iterations_last_() {
   SolverParameter param;
   ReadProtoFromTextFileOrDie(param_file, &param);
   Init(param);
@@ -180,6 +181,9 @@ void Solver<Dtype>::Step(int iters) {
   vector<Dtype> losses;
   Dtype smoothed_loss = 0;
 
+  iteration_timer_.Start();
+  Timer timer;
+
   for (; iter_ < stop_iter; ++iter_) {
     if (param_.test_interval() && iter_ % param_.test_interval() == 0
         && (iter_ > 0 || param_.test_initialization())
@@ -187,6 +191,7 @@ void Solver<Dtype>::Step(int iters) {
       TestAll();
     }
 
+    timer.Start();
     const bool display = param_.display() && iter_ % param_.display() == 0;
     net_->set_debug_info(display && param_.debug_info());
     Dtype loss = net_->ForwardBackward(bottom_vec);
@@ -225,14 +230,25 @@ void Solver<Dtype>::Step(int iters) {
         }
       }
     }
-    if (callback_) {
-      callback_->before_iteration();
+    ostringstream timing;
+    timing << "Timing ";
+    if (param().solver_mode() == SolverParameter_SolverMode_GPU) {
+      timing << " (device " << param().device_id() << ")";
     }
+    timing << " sgd: " << timer.MilliSeconds();
+    if (callback_) {
+      callback_->before_iteration(&timer, &timing);
+    }
+    timer.Start();
     ComputeUpdateValue();
     net_->Update();
+    timing << " apply: " << timer.MilliSeconds();
     if (callback_) {
-      callback_->finish_iteration();
+      callback_->finish_iteration(&timer, &timing);
     }
+#ifdef BENCHMARK_SOLVER
+    LOG(INFO)<< timing.str();
+#endif
 
     // Save a snapshot if needed.
     if (param_.snapshot()
@@ -492,7 +508,12 @@ void SGDSolver<Dtype>::ComputeUpdateValue() {
   // get the learning rate
   Dtype rate = GetLearningRate();
   if (this->param_.display() && this->iter_ % this->param_.display() == 0) {
-    LOG(INFO) << "Iteration " << this->iter_ << ", lr = " << rate;
+    float lapse = iteration_timer_.Seconds();
+    float per_s = (this->iter_ - iterations_last_) / (lapse ? lapse : 1);
+    LOG(INFO) << "Iteration " << this->iter_ << " (" << per_s << "/s), "
+              << "lr = " << rate;
+    iteration_timer_.Start();
+    iterations_last_ = this->iter_;
   }
   ClipGradients();
   Dtype momentum = this->param_.momentum();

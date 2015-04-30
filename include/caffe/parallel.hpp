@@ -12,6 +12,7 @@
 #include "caffe/proto/caffe.pb.h"
 #include "caffe/solver.hpp"
 #include "caffe/syncedmem.hpp"
+#include "caffe/util/benchmark.hpp"
 #include "caffe/util/blocking_queue.hpp"
 
 namespace caffe {
@@ -99,8 +100,8 @@ class P2PSync : public GPUParams<Dtype>, public Solver<Dtype>::Callback,
   static void divide_batch_size(NetParameter* net);
 
  protected:
-  void before_iteration();
-  void finish_iteration();
+  void before_iteration(Timer* timer, ostringstream* timing);
+  void finish_iteration(Timer* timer, ostringstream* timing);
 
   void InternalThreadEntry();
 

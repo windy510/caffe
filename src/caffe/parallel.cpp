@@ -264,7 +264,7 @@ void P2PSync<Dtype>::InternalThreadEntry() {
 }
 
 template<typename Dtype>
-void P2PSync<Dtype>::before_iteration() {
+void P2PSync<Dtype>::before_iteration(Timer* timer, ostringstream* timing) {
 #ifndef CPU_ONLY
 #ifdef DEBUG
   int device;
@@ -276,6 +276,7 @@ void P2PSync<Dtype>::before_iteration() {
 
   // Sum children gradients as they appear in the queue
   for (int i = 0; i < children_.size(); ++i) {
+    timer->Start();
     P2PSync<Dtype> *child = queue_.pop();
     Dtype* src = child->parent_grads_;
     Dtype* dst = diff_;
@@ -296,10 +297,12 @@ void P2PSync<Dtype>::before_iteration() {
 #endif
 
     caffe_gpu_add(size_, src, dst, dst);
+    *timing << " add_grad: " << timer->MilliSeconds();
   }
 
   // Send gradients to parent
   if (parent_) {
+    timer->Start();
     Dtype* src = diff_;
     Dtype* dst = parent_grads_;
 
@@ -315,6 +318,7 @@ void P2PSync<Dtype>::before_iteration() {
         cudaMemcpyDeviceToDevice, cudaStreamDefault));
     CUDA_CHECK(cudaStreamSynchronize(cudaStreamDefault));
     parent_->queue_.push(this);
+    *timing << " send_grad: " << timer->MilliSeconds();
   } else {
     // Loss functions divide gradients by the batch size, so to compensate
     // for split batch, the root solver divides by number of solvers.
@@ -325,7 +329,7 @@ void P2PSync<Dtype>::before_iteration() {
 }
 
 template<typename Dtype>
-void P2PSync<Dtype>::finish_iteration() {
+void P2PSync<Dtype>::finish_iteration(Timer* timer, ostringstream* timing) {
 #ifndef CPU_ONLY
 #ifdef DEBUG
   int device;
@@ -335,11 +339,16 @@ void P2PSync<Dtype>::finish_iteration() {
 
   // Wait for update from parent
   if (parent_) {
+    timer->Start();
     P2PSync<Dtype> *parent = queue_.pop();
     CHECK(parent == parent_);
+    *timing << " recv_param: " << timer->MilliSeconds();
   }
 
   // Update children
+  if (children_.size()) {
+    timer->Start();
+  }
   for (int i = 0; i < children_.size(); ++i) {
     Dtype* src = data_;
     Dtype* dst = children_[i]->data_;
@@ -360,6 +369,9 @@ void P2PSync<Dtype>::finish_iteration() {
   }
   for (int i = 0; i < children_.size(); ++i) {
     children_[i]->queue_.push(this);
+  }
+  if (children_.size()) {
+    *timing << " send_param: " << timer->MilliSeconds();
   }
 #endif
 }

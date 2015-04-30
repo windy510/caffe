@@ -5,6 +5,7 @@
 #include <vector>
 
 #include "caffe/net.hpp"
+#include "caffe/util/benchmark.hpp"
 
 namespace caffe {
 
@@ -42,8 +43,8 @@ class Solver {
   // Invoked before and after an iteration
   class Callback {
    public:
-    virtual void before_iteration() = 0;
-    virtual void finish_iteration() = 0;
+    virtual void before_iteration(Timer* timer, ostringstream* timing) = 0;
+    virtual void finish_iteration(Timer* timer, ostringstream* timing) = 0;
   };
   Callback* callback() const { return callback_; }
   void set_callback(Callback* value) {
@@ -77,6 +78,9 @@ class Solver {
   vector<shared_ptr<Net<Dtype> > > test_nets_;
   Callback* callback_;
 
+  Timer iteration_timer_;
+  float iterations_last_;
+
   DISABLE_COPY_AND_ASSIGN(Solver);
 };
 
@@ -107,6 +111,9 @@ class SGDSolver : public Solver<Dtype> {
   // temp maintains other information that might be needed in computation
   //   of gradients/updates and is not needed in snapshots
   vector<shared_ptr<Blob<Dtype> > > history_, update_, temp_;
+
+  using Solver<Dtype>::iteration_timer_;
+  using Solver<Dtype>::iterations_last_;
 
   DISABLE_COPY_AND_ASSIGN(SGDSolver);
 };
